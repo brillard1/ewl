@@ -1,0 +1,51 @@
+# Vision: FGVC Aircraft + ViT-Base with LoRA
+
+experiment_name: "aircraft_vit_base"
+description: "EWL on FGVC Aircraft variant classification with ViT-Base + LoRA"
+
+dataset:
+  name: "aircraft"
+  image_size: 224
+  augmentation: true
+  num_workers: 4
+  seed: 11
+
+model:
+  model_id: "vit_base_patch16_224"
+  pretrained: true
+  drop_rate: 0.0
+
+lora:
+  r: 4
+  lora_alpha: 8
+  target_modules:
+    - "qkv"
+    - "attn.proj"
+    - "fc1"
+    - "fc2"
+  lora_dropout: 0.1
+  bias: "none"
+  modules_to_save: ["head"]
+
+training:
+  num_epochs: 10
+  micro_batch_size: 64
+  learning_rate: 1.0e-4
+  head_learning_rate: 1.0e-3
+  weight_decay: 0.01
+  max_grad_norm: 2.0
+  warmup_steps: 100
+
+ewl:
+  alpha: 0.9
+  temperature: 1
+  warmup_steps: 100
+  use_lora_proxy: true
+
+wandb:
+  project: "ewl-vision"
+  tags: ["aircraft", "vit-base"]
+
+output:
+  base_dir: "outputs/vision/aircraft_vit_base"
+  save_checkpoints: False
