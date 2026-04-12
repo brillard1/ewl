@@ -8,3 +8,4 @@ venv/
 data
 assets
 outputs
+.code-review-graph/
