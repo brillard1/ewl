@@ -43,7 +43,8 @@ ewl:
   use_lora_proxy: true
 
 wandb:
-  project: "ewl-vision"
+  project: "ewl-vision-ensf619"
+  entity: "sayannath235"
   tags: ["aircraft", "vit-base"]
 
 output:

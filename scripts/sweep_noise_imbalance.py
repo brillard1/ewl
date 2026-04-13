@@ -44,7 +44,7 @@ NOISE_SWEEP      = [0, 0.1, 0.2, 0.3, 0.4]
 # Imbalance ratio: n_min / n_max  (IF = 1/ratio, so 0.1→IF=10, 0.05→IF=20)
 IMBALANCE_SWEEP  = [1, 0.5, 0.2, 0.1, 0.05]
 
-SEEDS   = [11]
+SEEDS   = [11, 22, 33]
 CONFIG  = "configs/vision/aircraft_vit_base.yaml"
 BASE_OUT = "outputs/vision/aircraft_noise_imbalance"
 

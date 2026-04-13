@@ -2,6 +2,8 @@
 Training loops for vision classification tasks
 """
 
+import time
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -105,6 +107,10 @@ def train_vision_vanilla(
 
     history = []
     global_step = 0
+    peak_vram_gb = 0.0
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats(device)
 
     print("\n" + "=" * 70)
     print("TRAINING: Standard LoRA Fine-tuning (Vision)")
@@ -116,10 +122,13 @@ def train_vision_vanilla(
         epoch_correct = 0
         epoch_total = 0
         all_train_preds, all_train_labels = [], []
+        step_times = []
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
 
         for batch_idx, batch in enumerate(pbar):
+            t0 = time.perf_counter()
+
             images = batch["pixel_values"].to(device)
             labels = batch["labels"].to(device)
 
@@ -142,6 +151,8 @@ def train_vision_vanilla(
 
             optimizer.step()
             scheduler.step()
+
+            step_times.append((time.perf_counter() - t0) * 1000)  # ms
 
             # Track metrics
             epoch_loss += loss.item() * labels.size(0)
@@ -167,6 +178,13 @@ def train_vision_vanilla(
         train_acc = epoch_correct / epoch_total
         train_f1 = _sk_f1(all_train_labels, all_train_preds, average="weighted", zero_division=0) if _SKLEARN_AVAILABLE else float("nan")
 
+        # System metrics
+        mean_step_ms = float(np.mean(step_times)) if step_times else 0.0
+        batch_size = config["training"].get("micro_batch_size", 64)
+        throughput = batch_size / (mean_step_ms / 1000.0) if mean_step_ms > 0 else 0.0
+        if torch.cuda.is_available():
+            peak_vram_gb = torch.cuda.max_memory_allocated(device) / 1e9
+
         # Evaluate on validation set
         val_metrics = evaluate_vision_metrics(model, val_loader, device)
         val_acc  = val_metrics["accuracy"]
@@ -178,7 +196,7 @@ def train_vision_vanilla(
             f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
             f"train_acc={train_acc:.4f}  val_acc={val_acc:.4f}  "
             f"train_f1={train_f1:.4f}  val_f1={val_f1:.4f}  "
-            f"entropy=N/A"
+            f"step={mean_step_ms:.1f}ms  vram={peak_vram_gb:.2f}GB"
         )
 
         # Log to wandb
@@ -193,6 +211,9 @@ def train_vision_vanilla(
                     "val/accuracy": val_acc,
                     "val/weighted_f1": val_f1,
                     "learning_rate": scheduler.get_last_lr()[0],
+                    "system/peak_vram_gb": peak_vram_gb,
+                    "system/step_time_ms": mean_step_ms,
+                    "system/throughput_samples_per_sec": throughput,
                 }
             )
 
@@ -211,8 +232,16 @@ def train_vision_vanilla(
                 "ema_std":  None,
                 "ema_min":  None,
                 "ema_max":  None,
+                "peak_vram_gb": peak_vram_gb,
+                "step_time_ms": mean_step_ms,
+                "throughput_samples_per_sec": throughput,
             }
         )
+
+    if wandb_run:
+        wandb_run.summary["system/peak_vram_gb"] = peak_vram_gb
+        wandb_run.summary["system/mean_step_time_ms"] = mean_step_ms
+        wandb_run.summary["system/throughput_samples_per_sec"] = throughput
 
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE")
@@ -257,9 +286,19 @@ def train_vision_ewl(
 
     history = []
     global_step = 0
+    peak_vram_gb = 0.0
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats(device)
+
+    # EWL CPU state size (loss_ema + seen tensors, lives entirely on CPU)
+    ewl_cpu_state_kb = (
+        ema_weighter.loss_ema.nbytes + ema_weighter.seen.nbytes
+    ) / 1024.0
 
     print("\n" + "=" * 70)
     print("TRAINING: EWL (Vision - Learning-Progress-Based Weighting)")
+    print(f"EWL CPU state: {ewl_cpu_state_kb:.1f} KB  (loss_ema + seen, not on GPU)")
     print("=" * 70)
 
     for epoch in range(num_epochs):
@@ -271,6 +310,7 @@ def train_vision_ewl(
         epoch_total = 0
         epoch_grad_proxy_sum = 0.0
         epoch_grad_proxy_count = 0
+        step_times = []
 
         # Per-sample accumulator for diagnostic .npz files
         epoch_sample_stats = []
@@ -293,6 +333,8 @@ def train_vision_ewl(
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
 
         for batch_idx, batch in enumerate(pbar):
+            t0 = time.perf_counter()
+
             images = batch["pixel_values"].to(device)
             labels = batch["labels"].to(device)
             sample_ids = batch["sample_id"].to(device)
@@ -337,6 +379,8 @@ def train_vision_ewl(
 
             optimizer.step()
             scheduler.step()
+
+            step_times.append((time.perf_counter() - t0) * 1000)  # ms
 
             # Track metrics
             epoch_loss += per_sample_loss.mean().item() * labels.size(0)
@@ -419,6 +463,13 @@ def train_vision_ewl(
         # EMA state snapshot at epoch end
         ema_stats = ema_weighter.get_statistics()
 
+        # System metrics
+        mean_step_ms = float(np.mean(step_times)) if step_times else 0.0
+        batch_size = config["training"].get("micro_batch_size", 64)
+        throughput = batch_size / (mean_step_ms / 1000.0) if mean_step_ms > 0 else 0.0
+        if torch.cuda.is_available():
+            peak_vram_gb = torch.cuda.max_memory_allocated(device) / 1e9
+
         # Evaluate on validation set
         val_metrics = evaluate_vision_metrics(model, val_loader, device)
         val_acc  = val_metrics["accuracy"]
@@ -431,7 +482,7 @@ def train_vision_ewl(
             f"train_loss={train_loss:.4f}  train_w_loss={train_weighted_loss:.4f}  val_loss={val_loss:.4f}  "
             f"train_acc={train_acc:.4f}  val_acc={val_acc:.4f}  "
             f"train_f1={train_f1:.4f}  val_f1={val_f1:.4f}  "
-            f"entropy={entropy:.3f}"
+            f"entropy={entropy:.3f}  step={mean_step_ms:.1f}ms  vram={peak_vram_gb:.2f}GB"
         )
 
         # Log to wandb
@@ -476,6 +527,14 @@ def train_vision_ewl(
                         )
                     except Exception:
                         pass
+            log_dict.update(
+                {
+                    "system/peak_vram_gb": peak_vram_gb,
+                    "system/step_time_ms": mean_step_ms,
+                    "system/throughput_samples_per_sec": throughput,
+                    "system/ewl_cpu_state_kb": ewl_cpu_state_kb,
+                }
+            )
             wandb_run.log(log_dict)
 
         history.append(
@@ -494,8 +553,18 @@ def train_vision_ewl(
                 "ema_std":  ema_stats["std_ema"],
                 "ema_min":  ema_stats["min_ema"],
                 "ema_max":  ema_stats["max_ema"],
+                "peak_vram_gb": peak_vram_gb,
+                "step_time_ms": mean_step_ms,
+                "throughput_samples_per_sec": throughput,
+                "ewl_cpu_state_kb": ewl_cpu_state_kb,
             }
         )
+
+    if wandb_run:
+        wandb_run.summary["system/peak_vram_gb"] = peak_vram_gb
+        wandb_run.summary["system/mean_step_time_ms"] = mean_step_ms
+        wandb_run.summary["system/throughput_samples_per_sec"] = throughput
+        wandb_run.summary["system/ewl_cpu_state_kb"] = ewl_cpu_state_kb
 
     if ewl_logger is not None:
         ewl_logger.finish()
