@@ -28,16 +28,18 @@ Experiments on three fine-grained benchmarks with ViT-Small/16 yield two
 findings.
 First, the gradient proxy is not optional: ablating it causes a $-6.76\%$
 drop on FGVC-Aircraft.
-Second, EWL's noise robustness is \emph{dataset-conditional}: on Aircraft,
-where inter-class similarity sustains a wide frontier, EWL improves over SFT
-by $+4.3$--$6.8\%$ under 10--40\% label noise; on CUB-200 and Stanford Dogs
-it is harmful ($-0.9\%$ to $-6.6\%$).
+Second, the magnitude of EWL's noise-robustness gain is
+\emph{dataset-conditional}: on Aircraft, where inter-class similarity
+sustains a wide frontier, EWL improves over SFT by $+4.3$--$6.8\%$ under
+10--40\% label noise; on CUB-200 the advantage is smaller ($+1.9$--$2.8\%$)
+and realised earlier in training; on Stanford Dogs EWL merely matches SFT
+within noise.
 On clean data EWL matches SFT within std at $5.9\times$ step-time overhead
 and zero additional GPU memory.
 
 \noindent\textbf{Contributions:} (i)~\textbf{EWL}, an online LoRA
 sample-weighting method based on loss velocity gated by a LoRA gradient
 proxy; (ii)~evidence that the proxy is \textbf{essential for stability};
-(iii)~\textbf{dataset-conditional noise robustness} tied to adaptation
-frontier width, with practical usage guidance; (iv)~full ablations over
+(iii)~\textbf{dataset-conditional noise-robustness gains} tied to
+adaptation frontier width, with practical usage guidance; (iv)~full ablations over
 rank, temperature, EMA decay, and class imbalance (Appendix).

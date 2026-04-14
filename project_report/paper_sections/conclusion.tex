@@ -5,9 +5,10 @@ We presented EWL, a progress-adaptive sample weighting method for LoRA
 fine-tuning that gates per-sample loss velocity with a LoRA gradient proxy ---
 no meta-gradients, no held-out data, no inference cost.
 Two findings stand out: the gradient proxy is essential (ablating it drops
-Aircraft by $-6.76\%$), and noise robustness is dataset-conditional, improving
-SFT by $+4.3$--$6.8\%$ on Aircraft's wide frontier but harmful
-($-0.9$ to $-6.6\%$) on the narrower CUB-200 and Stanford Dogs.
+Aircraft by $-6.76\%$), and noise-robustness gains are dataset-conditional,
+improving SFT by $+4.3$--$6.8\%$ on Aircraft's wide frontier, by
+$+1.9$--$2.8\%$ on CUB-200 (realised earlier in training), and matching SFT
+within noise on Stanford Dogs.
 EWL matches SFT on clean data and is best suited to fine-grained, noise-prone
 tasks; its applicability is tied directly to adaptation frontier width.
 Future work: vectorising the per-sample loop to cut the $5.9\times$ overhead,

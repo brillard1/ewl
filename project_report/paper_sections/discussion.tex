@@ -1,7 +1,7 @@
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{Why does frontier width determine noise robustness?}
+\paragraph{Why does frontier width determine the size of the noise gain?}
 On Aircraft, 100 near-identical variants keep decision boundaries tightly
 packed, so a substantial fraction of clean samples remain actively declining
 at any step, yielding a strong positive progress signal.
@@ -9,11 +9,16 @@ A corrupted label cannot produce sustained decline --- the rank-$r$ LoRA
 update cannot reconcile it with consistent gradients from visually similar
 correct classes --- so its loss stagnates and $s_i^{\text{rel}} \to 0$.
 The frontier is wide enough that velocity cleanly separates corrupted from
-informative samples.
+informative samples, yielding a large, monotonically increasing gain that
+persists to the final epoch.
 On CUB-200 and Stanford Dogs, classes are more separable: clean samples are
 learned quickly, the frontier shrinks early, and noisy samples stagnate
-alongside hard clean samples near boundaries, so EWL cannot distinguish them
-and occasionally upweights mislabelled examples.
+alongside hard clean samples near boundaries, so EWL's discrimination is
+weaker.
+The effect is that EWL still reaches or exceeds the SFT baseline --- earlier
+in training on CUB-200 ($+1.9$--$2.8\%$) and at parity on Dogs --- but the
+velocity signal cannot be leveraged into the sustained, large advantage seen
+on Aircraft, and the gap closes or inverts by the final epoch.
 Appendix~\ref{app:mechanism} confirms this: on Aircraft the per-sample
 (EMA, velocity) clusters separate and the clean/noisy weight-separation score
 grows positive, while on CUB and Dogs the clusters overlap and the score stays
