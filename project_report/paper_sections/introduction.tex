@@ -1,68 +1,43 @@
 \section{Introduction}
 \label{sec:intro}
 
-Fine-tuning a pre-trained transformer with LoRA~\cite{hu2022lora} is
-fundamentally different from training from scratch: the model arrives with
-strong priors, and the informativeness of each training sample changes as
-fine-tuning proceeds.
-Some examples become \emph{mastered} --- their loss approaches zero and their
-gradient contribution is negligible.
-Others are \emph{conflicting} --- labels are irreconcilable with the pre-trained
-prior (e.g.\ label noise), so their loss stagnates.
-Between these two groups sits a shifting minority at the \emph{adaptation
-frontier}: examples where loss is actively declining and gradients are large and
-directionally consistent.
-Standard SFT with LoRA treats all three groups equally, diluting each mini-batch
-gradient with near-zero contributions from mastered samples and noisy
-contributions from conflicting ones.
+Fine-tuning a pre-trained transformer with LoRA~\cite{hu2022lora} is not
+training from scratch: the model arrives with strong priors, and sample
+informativeness shifts during training.
+Some examples become \emph{mastered} (loss $\to 0$); others are
+\emph{conflicting} (labels irreconcilable with the prior, e.g.\ noise); a
+shifting minority sits at the \emph{adaptation frontier}, where loss is
+actively declining.
+Standard SFT treats all three equally, diluting each mini-batch gradient.
+Prior approaches fall short: curriculum/self-paced
+learning~\cite{bengio2009curriculum,kumar2010self} weights by loss
+\emph{magnitude}, conflating frontier with noise; meta-reweighting~\cite{ren2018learning,shu2019meta}
+needs a clean held-out set and doubles compute; Dataset
+Cartography~\cite{swayamdipta2020dataset} requires a preliminary pass.
 
-Prior work on this problem leaves a gap.
-Curriculum and self-paced learning~\cite{bengio2009curriculum,kumar2010self}
-weight samples by loss \emph{magnitude}, which conflates frontier with
-irreconcilable noise --- both exhibit high loss, but only the former benefits
-from upweighting.
-Meta-reweighting~\cite{ren2018learning,shu2019meta} learns optimal weights via
-second-order gradients, but requires a clean held-out set and roughly doubles
-compute.
-Dataset Cartography~\cite{swayamdipta2020dataset} maps the ``ambiguous'' stratum
---- the online analogue of our frontier --- but requires a dedicated
-preliminary training pass.
+We propose \textbf{EWL (Example Weighting via Learning Progress)}, an online
+method that tracks per-sample loss velocity via an EMA and gates it with a
+\emph{LoRA gradient proxy} --- the mean Frobenius norm of adapter gradients,
+acting as an adaptive temperature that sharpens weights during rapid
+adaptation and decays to uniform near convergence.
+This gating is essential: without it, aggressive early reweighting
+destabilises training.
+EWL requires no meta-gradients, no held-out data, and no inference cost.
 
-We propose \textbf{EWL (Example Weighting via Learning Progress)}, a method that
-identifies the adaptation frontier online with no additional data or compute
-beyond the training run itself.
-EWL tracks per-sample loss velocity as a relative progress signal via
-exponential moving averages (EMA), then modulates it by a \emph{LoRA gradient
-proxy} --- the mean Frobenius norm of adapter gradients.
-The proxy acts as an adaptive temperature: large during rapid adaptation, it
-sharpens the weight distribution toward frontier samples; near convergence, it
-decays and gracefully recovers uniform weighting.
-This gating is critical: without it, the raw progress signal applies aggressive
-reweighting before the adapter has accumulated meaningful history, destabilising
-training.
-The per-sample weights are applied via a softmax-weighted loss with a single
-temperature $\tau$.
-EWL requires no meta-gradients, no held-out data, and adds no inference cost.
+Experiments on three fine-grained benchmarks with ViT-Small/16 yield two
+findings.
+First, the gradient proxy is not optional: ablating it causes a $-6.76\%$
+drop on FGVC-Aircraft.
+Second, EWL's noise robustness is \emph{dataset-conditional}: on Aircraft,
+where inter-class similarity sustains a wide frontier, EWL improves over SFT
+by $+4.3$--$6.8\%$ under 10--40\% label noise; on CUB-200 and Stanford Dogs
+it is harmful ($-0.9\%$ to $-6.6\%$).
+On clean data EWL matches SFT within std at $5.9\times$ step-time overhead
+and zero additional GPU memory.
 
-Experiments on three fine-grained visual benchmarks using ViT-Small/16 with LoRA
-reveal two findings.
-First, the LoRA gradient proxy is not optional: ablating it causes a $-6.76\%$
-accuracy drop on FGVC-Aircraft, demonstrating that ungated reweighting
-destabilises training on tasks with densely packed decision boundaries.
-Second, EWL's noise robustness is \emph{dataset-conditional}: on Aircraft, where
-extreme inter-class similarity sustains a wide adaptation frontier, EWL
-improves over SFT by $+4.3$--$6.8\%$ under 10--40\% label noise; on CUB-200 and
-Stanford Dogs, where classes are more separable, EWL is harmful under noise
-($-0.9\%$ to $-6.6\%$).
-On clean data, EWL matches SFT within standard deviation at a $5.9\times$
-step-time overhead with zero additional GPU memory.
-
-\noindent\textbf{Contributions:} (i)~\textbf{EWL}, a single-pass, online sample
-weighting method for LoRA fine-tuning based on per-sample loss velocity gated
-by a LoRA gradient proxy; (ii)~empirical evidence that the gradient proxy is
-\textbf{essential for training stability} --- ablating it causes severe
-degradation on narrow-boundary tasks; (iii)~identification of
-\textbf{dataset-conditional noise robustness} tied to adaptation frontier
-width, with practical guidance on when EWL should and should not be applied;
-(iv)~a full ablation over rank, temperature, EMA decay, and class imbalance
-(Appendix).
+\noindent\textbf{Contributions:} (i)~\textbf{EWL}, an online LoRA
+sample-weighting method based on loss velocity gated by a LoRA gradient
+proxy; (ii)~evidence that the proxy is \textbf{essential for stability};
+(iii)~\textbf{dataset-conditional noise robustness} tied to adaptation
+frontier width, with practical usage guidance; (iv)~full ablations over
+rank, temperature, EMA decay, and class imbalance (Appendix).

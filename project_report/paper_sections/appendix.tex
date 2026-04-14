@@ -159,6 +159,27 @@ $k$ times as many samples as the least frequent.
 \section{Clean Training Curves and Proxy Ablation}
 \label{app:curves}
 
+\begin{table}[h]
+  \centering
+  \small
+  \caption{
+    Top-1 accuracy (\%) on clean data, mean\,$\pm$\,std over 3 seeds.
+    EWL matches SFT within std; ablating the gradient proxy causes a
+    $-6.76\%$ drop on FGVC-Aircraft.
+  }
+  \label{tab:main_results}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccr}
+    \toprule
+    \textbf{Dataset} & \textbf{SFT} & \textbf{EWL (no proxy)} & \textbf{EWL} & $\boldsymbol{\Delta}$ \\
+    \midrule
+    FGVC-Aircraft    & $58.94{\pm}0.60$ & $52.18{\pm}0.48$ & $58.99{\pm}0.71$ & $+0.05$ \\
+    CUB-200-2011     & $86.15{\pm}0.29$ & $85.97{\pm}0.40$ & $86.30{\pm}0.42$ & $+0.16$ \\
+    Stanford Dogs    & $89.43{\pm}0.05$ & $88.89{\pm}0.24$ & $89.41{\pm}0.06$ & $-0.01$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figures/fig_all_datasets_curves.pdf}
