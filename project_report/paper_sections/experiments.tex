@@ -1,0 +1,123 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\paragraph{Setup.}
+We use ViT-Small/16~\cite{dosovitskiy2021image} pretrained on ImageNet-21k
+(21.7M params) via \texttt{timm}~\cite{wightman2021timm}.
+LoRA adapters ($r{=}4$) are applied to $W_Q, W_K, W_V, W_O$ in all 12 attention
+blocks (307K trainable, 1.41\% of total); the classifier head is fully
+fine-tuned.
+We evaluate on \textbf{FGVC-Aircraft}~\cite{maji2013fgvc} (100 variants;
+extreme similarity), \textbf{CUB-200-2011}~\cite{wah2011cub} (200 birds;
+moderately separable), and \textbf{Stanford
+Dogs}~\cite{khosla2011stanforddogs} (120 breeds).
+All models train for 50 epochs with AdamW~\cite{loshchilov2019adamw}
+($\eta{=}5{\times}10^{-4}$, cosine decay); EWL defaults are $\alpha{=}0.9$,
+$\tau{=}1.0$, warmup $K{=}48$.
+Results are mean\,$\pm$\,std over three seeds $\{11,22,33\}$.
+We compare \textbf{SFT} (LoRA baseline), \textbf{EWL} (full method), and
+\textbf{EWL (no proxy)} ($g\equiv 1$).
+Full protocols are in Appendix~\ref{app:implementation}.
+
+\paragraph{Clean accuracy and proxy ablation.}
+Table~\ref{tab:main_results} reports top-1 accuracy on clean data.
+EWL with the proxy matches SFT within standard deviation on all three
+benchmarks ($\Delta\!=\!+0.05, +0.16, -0.01$); we do not claim clean-data gains.
+The decisive result is the no-proxy ablation: removing the gradient proxy
+while retaining the progress signal causes a $\mathbf{-6.76\%}$ drop on
+Aircraft, with smaller but consistently negative drops on CUB-200 and Dogs.
+Aircraft's 100 visually similar classes have densely packed decision boundaries;
+indiscriminate early reweighting, before the EMA has stabilised, amplifies
+unstable gradient directions and the model cannot recover.
+Training curves (Appendix~\ref{app:curves}) confirm the gap is a training
+instability rather than a final-epoch artefact.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{
+    Top-1 accuracy (\%) on clean data, mean\,$\pm$\,std over 3 seeds.
+    EWL matches SFT within std; ablating the gradient proxy causes a
+    $-6.76\%$ drop on FGVC-Aircraft.
+  }
+  \label{tab:main_results}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccr}
+    \toprule
+    \textbf{Dataset} & \textbf{SFT} & \textbf{EWL (no proxy)} & \textbf{EWL} & $\boldsymbol{\Delta}$ \\
+    \midrule
+    FGVC-Aircraft    & $58.94{\pm}0.60$ & $52.18{\pm}0.48$ & $58.99{\pm}0.71$ & $+0.05$ \\
+    CUB-200-2011     & $86.15{\pm}0.29$ & $85.97{\pm}0.40$ & $86.30{\pm}0.42$ & $+0.16$ \\
+    Stanford Dogs    & $89.43{\pm}0.05$ & $88.89{\pm}0.24$ & $89.41{\pm}0.06$ & $-0.01$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Noise robustness --- dataset-conditional.}
+We inject uniform random label noise into the training set at rates of 10--40\%
+and evaluate on the clean test set.
+Table~\ref{tab:noise_results} and Figure~\ref{fig:noise_delta} show a striking
+divergence.
+On Aircraft, EWL improves over SFT by $+4.26\%$ to $+6.81\%$ across all noise
+levels.
+On CUB-200, the gap is mildly negative ($-0.9$ to $-1.6$); on Stanford Dogs it
+drops to $-6.55\%$ at 40\% noise.
+This divergence is the central empirical finding of this work; the mechanism
+is analysed in \S\ref{sec:discussion}.
+Full noise results at every level are in Appendix~\ref{app:noise}.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{
+    Top-1 accuracy (\%) under label noise, mean\,$\pm$\,std over 3 seeds.
+    Aircraft shows a large, monotonically increasing EWL advantage;
+    CUB-200 and Dogs show the opposite.
+  }
+  \label{tab:noise_results}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{llccc}
+    \toprule
+    \textbf{Dataset} & \textbf{Noise} & \textbf{SFT} & \textbf{EWL} & $\boldsymbol{\Delta}$ \\
+    \midrule
+    FGVC-Aircraft & 10\% & $51.90{\pm}0.65$ & $56.16{\pm}0.43$ & $\mathbf{+4.26}$ \\
+    FGVC-Aircraft & 20\% & $46.21{\pm}0.98$ & $52.12{\pm}0.55$ & $\mathbf{+5.90}$ \\
+    FGVC-Aircraft & 30\% & $40.26{\pm}0.64$ & $47.07{\pm}0.66$ & $\mathbf{+6.81}$ \\
+    FGVC-Aircraft & 40\% & $34.64{\pm}1.03$ & $40.89{\pm}1.68$ & $\mathbf{+6.25}$ \\
+    \midrule
+    CUB-200-2011  & 20\% & $75.08{\pm}0.55$ & $73.53{\pm}0.37$ & $-1.55$ \\
+    CUB-200-2011  & 40\% & $60.71{\pm}0.77$ & $59.45{\pm}0.91$ & $-1.26$ \\
+    \midrule
+    Stanford Dogs & 20\% & $80.30{\pm}0.39$ & $77.87{\pm}0.78$ & $-2.43$ \\
+    Stanford Dogs & 40\% & $71.02{\pm}0.67$ & $64.46{\pm}0.80$ & $\mathbf{-6.55}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/fig_noise_delta_lines_all_datasets.pdf}
+  \caption{
+    Accuracy delta $\Delta(\text{EWL}-\text{SFT})$ vs.\ label noise rate.
+    Aircraft rises to $+6.81\%$ at 30\% noise; CUB-200 stays slightly
+    negative; Stanford Dogs drops to $-6.55\%$ at 40\%.
+    The divergence is the central empirical finding of this work.
+  }
+  \label{fig:noise_delta}
+\end{figure}
+
+\paragraph{Ablations and overhead.}
+We sweep LoRA rank $r \in \{2,4,8,16\}$, softmax temperature
+$\tau \in \{0.5,\dots,3.0\}$, EMA decay $\alpha \in \{0.5,\dots,1.0\}$, and
+class imbalance $\text{IF}\in\{1,2,5,10,20\}$ on Aircraft (all tables and
+figures in Appendix~\ref{app:hparam}--\ref{app:imbalance}).
+Summarising: accuracy increases monotonically with rank ($57.40$ at $r{=}2$ to
+$62.08$ at $r{=}16$); $\tau{=}0.5$ over-concentrates and hurts, while
+$\tau\!\geq\!1.0$ is stable within $0.2\%$; EWL provides no meaningful benefit
+under class imbalance.
+Step-time overhead is $5.9\times$ SFT (stable $\sim$265\,ms vs.\ $\sim$45\,ms)
+with \textbf{zero} GPU memory overhead: both conditions peak at 9.46\,GB.
+The cost comes from CPU-side per-sample operations (EMA update, signal,
+softmax), serialised by CPU$\leftrightarrow$GPU synchronisation rather than
+floating-point throughput; vectorising these onto GPU tensors is natural
+future work.

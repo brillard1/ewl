@@ -1,0 +1,34 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Why does frontier width determine noise robustness?}
+The answer lies in the width of the adaptation frontier at any given step.
+On Aircraft, 100 variant classes share nearly identical silhouettes, decision
+boundaries are extremely close, and at any training step a substantial fraction
+of clean samples remain genuinely contested --- their loss is still actively
+declining, yielding a strong positive progress signal.
+A corrupted label never produces a sustained decline: the rank-$r$ LoRA update
+cannot reconcile a mislabelled sample with consistent gradients from visually
+similar correct classes, so its loss stagnates and $s_i^{\text{rel}} \to 0$.
+The frontier is wide enough that velocity discriminates cleanly between
+corrupted and informative samples.
+On CUB-200 and Stanford Dogs classes are more visually separable: clean samples
+are learned quickly, the frontier shrinks early, and noisy samples stagnate
+alongside harder clean samples near class boundaries.
+EWL cannot distinguish these two groups, and mislabelled examples occasionally
+receive high weights, degrading generalisation.
+Appendix~\ref{app:mechanism} confirms this mechanistically: on Aircraft, per-sample
+(EMA, velocity) clusters for clean and noisy samples separate clearly and the
+per-epoch clean/noisy weight-separation score grows positive, whereas on CUB and
+Dogs the clusters overlap and the separation score stays near or below zero.
+
+\paragraph{When to use EWL.}
+EWL is appropriate when all three conditions hold: (i)~the dataset has high
+inter-class similarity, sustaining a wide adaptation frontier; (ii)~label noise
+is present or suspected; (iii)~the $5.9\times$ step-time overhead is acceptable.
+EWL should be avoided when classes are visually separable (the frontier narrows,
+signal is non-discriminative, noise may be amplified), under class imbalance
+(the velocity mechanism is frequency-blind), or in single-pass/streaming
+settings (the EMA never converges).
+Cost-benefit notes, practical runtime diagnostics, and an extended limitations
+discussion are in Appendix~\ref{app:discussion}.

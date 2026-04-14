@@ -1,0 +1,21 @@
+\begin{abstract}
+LoRA fine-tuning treats all training examples equally, yet sample informativeness
+shifts continuously: mastered samples contribute near-zero gradients while
+conflicting samples never converge, leaving only a shrinking \emph{adaptation
+frontier} where loss is actively declining.
+We propose \textbf{EWL (Example Weighting via Learning Progress)}, which tracks
+per-sample loss velocity via exponential moving averages and upweights frontier
+samples using a LoRA gradient proxy --- the mean Frobenius norm of adapter
+gradients --- as an adaptive temperature, with no meta-gradients, held-out
+data, or inference cost.
+On three fine-grained benchmarks (FGVC-Aircraft, CUB-200-2011, Stanford
+Dogs), the gradient proxy is essential: ablating it causes a $-6.76\%$ drop on
+Aircraft, where ungated reweighting destabilises training on narrow decision
+boundaries.
+EWL's noise robustness is dataset-conditional --- on Aircraft it improves over
+SFT by $+4.3$--$6.8\%$ under 10--40\% label noise, while on CUB-200 and Dogs
+it is harmful ($-0.9\%$ to $-6.6\%$), as the progress signal cannot discriminate
+corrupted from informative samples when the adaptation frontier is narrow.
+On clean data, EWL matches SFT within standard deviation, at a $5.9\times$
+step-time overhead with zero additional GPU memory.
+\end{abstract}
