@@ -5,17 +5,11 @@ conflicting samples never converge, leaving only a shrinking \emph{adaptation
 frontier} where loss is actively declining.
 We propose \textbf{EWL (Example Weighting via Learning Progress)}, which tracks
 per-sample loss velocity via exponential moving averages and upweights frontier
-samples using a LoRA gradient proxy --- the mean Frobenius norm of adapter
-gradients --- as an adaptive temperature, with no meta-gradients, held-out
-data, or inference cost.
-On three fine-grained benchmarks (FGVC-Aircraft, CUB-200-2011, Stanford
-Dogs), the gradient proxy is essential: ablating it causes a $-6.76\%$ drop on
-Aircraft, where ungated reweighting destabilises training on narrow decision
-boundaries.
-Under label noise, EWL improves over SFT by $+4.3$--$6.8\%$ on Aircraft across
-10--40\% label noise, by $+1.9$--$2.8\%$ on CUB-200, and matches SFT within
-noise on Stanford Dogs --- with the magnitude of the gain tracking how
-narrow the adaptation frontier is.
-On clean data, EWL matches SFT within standard deviation, at a $5.9\times$
-step-time overhead with zero additional GPU memory.
+samples using a LoRA gradient proxy as an adaptive temperature, with no meta-gradients, held-out
+data, or inference cost. On three fine-grained benchmarks (FGVC-Aircraft, CUB-200-2011, Stanford
+Dogs), EWL matches SFT on clean data within standard deviation, while under
+10--40\% label noise it improves over SFT by up to +6.8\% on Aircraft,
++2.8\% on CUB-200, and remains competitive on Stanford Dogs---with gains
+scaling with frontier narrowness. EWL adds $5.9\times$ step-time overhead with zero additional GPU memory.
 \end{abstract}
+

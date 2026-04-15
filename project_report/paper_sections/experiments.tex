@@ -2,16 +2,16 @@
 \label{sec:experiments}
 
 \paragraph{Setup.}
-We use ViT-Small/16~\cite{dosovitskiy2021image} pretrained on ImageNet-21k
-(21.7M params) via \texttt{timm}~\cite{wightman2021timm}.
+We use ViT-Small/16~\cite{dosovitskiy2021vit} pretrained on ImageNet-21k
+(21.7M params) via \texttt{timm}~\cite{rw2019timm}.
 LoRA adapters ($r{=}4$) are applied to $W_Q, W_K, W_V, W_O$ in all 12 attention
 blocks (307K trainable, 1.41\% of total); the classifier head is fully
 fine-tuned.
-We evaluate on \textbf{FGVC-Aircraft}~\cite{maji2013fgvc} (100 variants;
+We evaluate on \textbf{FGVC-Aircraft}~\cite{maji2013aircraft} (100 variants;
 extreme similarity), \textbf{CUB-200-2011}~\cite{wah2011cub} (200 birds;
 moderately separable), and \textbf{Stanford
-Dogs}~\cite{khosla2011stanforddogs} (120 breeds).
-All models train for 50 epochs with AdamW~\cite{loshchilov2019adamw}
+Dogs}~\cite{KhoslaYaoJayadevaprakashFeiFei_FGVC2011} (120 breeds).
+All models train for 50 epochs with AdamW~\cite{loshchilov2017decoupled}
 ($\eta{=}5{\times}10^{-4}$, cosine decay); EWL defaults are $\alpha{=}0.9$,
 $\tau{=}1.0$, warmup $K{=}48$.
 Results are mean\,$\pm$\,std over three seeds $\{11,22,33\}$.
@@ -31,7 +31,7 @@ indiscriminate early reweighting, before the EMA has stabilised, amplifies
 unstable gradient directions and the model cannot recover.
 Full numbers are in Appendix~\ref{app:curves} (Table~\ref{tab:main_results});
 training curves there confirm the gap is a training instability rather than a
-final-epoch artefact.
+final-epoch artifact.
 
 \paragraph{Noise robustness.}
 We inject uniform random label noise into the training set at rates of 10--40\%
@@ -50,51 +50,49 @@ training --- is the central empirical finding; the mechanism is analysed in
 \S\ref{sec:discussion}.
 Full noise results at every level are in Appendix~\ref{app:noise}.
 
-\begin{table}[t]
+\begin{figure*}[htbp]
+\centering
+\begin{minipage}[t]{0.45\textwidth}
+  \vspace{0pt} % IMPORTANT: top alignment
   \centering
-  \small
-  \caption{
-    Top-1 validation accuracy (\%) under label noise, mean\,$\pm$\,std over
-    3 seeds. For Aircraft we report final-epoch test accuracy; for CUB-200
-    and Dogs we report validation accuracy at the earliest epoch where EWL
-    matches or exceeds the SFT baseline.
-    Aircraft shows a large, monotonically increasing EWL advantage;
-    CUB-200 shows a smaller positive advantage realised earlier in training;
-    Dogs matches SFT within noise.
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \renewcommand{\arraystretch}{1.05}
+  \captionof{table}{
+    Top-1 accuracy (\%) under label noise (mean$\pm$std, 3 seeds).
   }
   \label{tab:noise_results}
-  \setlength{\tabcolsep}{4pt}
+
+  \resizebox{\linewidth}{!}{%
   \begin{tabular}{llccc}
     \toprule
-    \textbf{Dataset} & \textbf{Noise} & \textbf{SFT} & \textbf{EWL} & $\boldsymbol{\Delta}$ \\
+    Dataset & Noise & SFT & EWL & $\Delta$ \\
     \midrule
-    FGVC-Aircraft & 10\% & $51.90{\pm}0.65$ & $56.16{\pm}0.43$ & $\mathbf{+4.26}$ \\
-    FGVC-Aircraft & 20\% & $46.21{\pm}0.98$ & $52.12{\pm}0.55$ & $\mathbf{+5.90}$ \\
-    FGVC-Aircraft & 30\% & $40.26{\pm}0.64$ & $47.07{\pm}0.66$ & $\mathbf{+6.81}$ \\
-    FGVC-Aircraft & 40\% & $34.64{\pm}1.03$ & $40.89{\pm}1.68$ & $\mathbf{+6.25}$ \\
+    Aircraft & 10\% & 51.90 & 56.16 & \textbf{+4.26} \\
+    Aircraft & 20\% & 46.21 & 52.12 & \textbf{+5.90} \\
+    Aircraft & 30\% & 40.26 & 47.07 & \textbf{+6.81} \\
+    Aircraft & 40\% & 34.64 & 40.89 & \textbf{+6.25} \\
     \midrule
-    CUB-200-2011  & 20\% & $73.79{\pm}0.15$ & $75.71{\pm}0.75$ & $\mathbf{+1.92}$ \\
-    CUB-200-2011  & 40\% & $66.69{\pm}1.40$ & $69.51{\pm}0.38$ & $\mathbf{+2.82}$ \\
+    CUB-200 & 20\% & 73.79 & 75.71 & \textbf{+1.92} \\
+    CUB-200 & 40\% & 66.69 & 69.51 & \textbf{+2.82} \\
     \midrule
-    Stanford Dogs & 20\% & $85.67{\pm}0.21$ & $85.71{\pm}0.31$ & $+0.04$ \\
-    Stanford Dogs & 40\% & $83.26{\pm}0.31$ & $83.38{\pm}0.45$ & $+0.12$ \\
+    Dogs & 20\% & 85.67 & 85.71 & +0.04 \\
+    Dogs & 40\% & 83.26 & 83.38 & +0.12 \\
     \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{figure}[t]
+  \end{tabular}}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.52\textwidth}
+  \vspace{0pt} % IMPORTANT: top alignment
   \centering
-  \includegraphics[width=0.95\linewidth]{figures/fig_noise_delta_lines_all_datasets.pdf}
-  \caption{
-    Accuracy delta $\Delta(\text{EWL}-\text{SFT})$ vs.\ label noise rate.
-    Aircraft rises to $+6.81\%$ at 30\% noise; CUB-200 shows a smaller
-    $+1.92$ to $+2.82\%$ advantage at the matched epoch; Stanford Dogs
-    matches SFT within noise.
-    The scale of the Aircraft gain is the central empirical finding of this
-    work.
+  \includegraphics[width=\linewidth]{figures/fig_noise_delta_lines_all_datasets.pdf}
+  \captionof{figure}{
+    Accuracy delta $\Delta(\mathrm{EWL}-\mathrm{SFT})$ vs.\ label noise rate.
   }
   \label{fig:noise_delta}
-\end{figure}
+\end{minipage}
+\end{figure*}
+\vspace{-1em}
 
 \paragraph{Ablations and overhead.}
 We sweep LoRA rank $r \in \{2,4,8,16\}$, softmax temperature

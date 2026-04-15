@@ -1,29 +1,20 @@
 \section{Discussion}
 \label{sec:discussion}
-
+\vspace{-0.5em}
 \paragraph{Why does frontier width determine the size of the noise gain?}
-On Aircraft, 100 near-identical variants keep decision boundaries tightly
-packed, so a substantial fraction of clean samples remain actively declining
-at any step, yielding a strong positive progress signal.
-A corrupted label cannot produce sustained decline --- the rank-$r$ LoRA
-update cannot reconcile it with consistent gradients from visually similar
-correct classes --- so its loss stagnates and $s_i^{\text{rel}} \to 0$.
-The frontier is wide enough that velocity cleanly separates corrupted from
-informative samples, yielding a large, monotonically increasing gain that
-persists to the final epoch.
-On CUB-200 and Stanford Dogs, classes are more separable: clean samples are
-learned quickly, the frontier shrinks early, and noisy samples stagnate
-alongside hard clean samples near boundaries, so EWL's discrimination is
-weaker.
-The effect is that EWL still reaches or exceeds the SFT baseline --- earlier
-in training on CUB-200 ($+1.9$--$2.8\%$) and at parity on Dogs --- but the
-velocity signal cannot be leveraged into the sustained, large advantage seen
-on Aircraft, and the gap closes or inverts by the final epoch.
-Appendix~\ref{app:mechanism} confirms this: on Aircraft the per-sample
-(EMA, velocity) clusters separate and the clean/noisy weight-separation score
-grows positive, while on CUB and Dogs the clusters overlap and the score stays
-near or below zero.
-
+On Aircraft, 100 near-identical variants sustain a wide frontier: clean
+samples keep declining throughout training, corrupted labels stagnate
+($s_i^{\text{rel}} \to 0$), and velocity cleanly separates the two ---
+yielding a large, persistent gain.
+On CUB-200 and Dogs, classes are more separable: clean samples are learned
+quickly, the frontier shrinks early, and noisy samples stagnate alongside
+hard clean samples, so EWL's discrimination weakens.
+EWL still matches or exceeds the SFT baseline --- earlier in training on
+CUB-200 ($+1.9$--$2.8\%$) and at parity on Dogs --- but the advantage does
+not persist to the final epoch.
+Appendix~\ref{app:mechanism} confirms this via (EMA, velocity) cluster
+separation and the clean/noisy weight-separation score.
+\vspace{-0.75em}
 \paragraph{When to use EWL.}
 EWL is appropriate when all three hold: (i)~high inter-class similarity
 sustaining a wide frontier; (ii)~suspected label noise; (iii)~the $5.9\times$

@@ -24,15 +24,15 @@ This gating is essential: without it, aggressive early reweighting
 destabilises training.
 EWL requires no meta-gradients, no held-out data, and no inference cost.
 
-Experiments on three fine-grained benchmarks with ViT-Small/16 yield two
+Experiments on three fine-grained benchmarks with ViT-Small/16~\cite{dosovitskiy2021vit} yield two
 findings.
 First, the gradient proxy is not optional: ablating it causes a $-6.76\%$
-drop on FGVC-Aircraft.
+drop on FGVC-Aircraft~\cite{maji2013aircraft}.
 Second, the magnitude of EWL's noise-robustness gain is
 \emph{dataset-conditional}: on Aircraft, where inter-class similarity
 sustains a wide frontier, EWL improves over SFT by $+4.3$--$6.8\%$ under
-10--40\% label noise; on CUB-200 the advantage is smaller ($+1.9$--$2.8\%$)
-and realised earlier in training; on Stanford Dogs EWL merely matches SFT
+10--40\% label noise; on CUB-200 \cite{wah2011cub} the advantage is smaller ($+1.9$--$2.8\%$)
+and realised earlier in training; on Stanford Dogs \cite{khosla2011dogs} EWL merely matches SFT
 within noise.
 On clean data EWL matches SFT within std at $5.9\times$ step-time overhead
 and zero additional GPU memory.
