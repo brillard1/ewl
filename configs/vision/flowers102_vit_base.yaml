@@ -1,10 +1,10 @@
-# Vision: Stanford Dogs + ViT-Base with LoRA
+# Vision: Flowers102 + ViT-Base with LoRA
 
-experiment_name: "stanford_dogs_vit_base"
-description: "EWL on Stanford Dogs breed classification with ViT-Base + LoRA"
+experiment_name: "flowers102_vit_base"
+description: "EWL on Oxford 102 Flowers classification with ViT-Base + LoRA"
 
 dataset:
-  name: "stanford_dogs"
+  name: "flowers102"
   image_size: 224
   augmentation: true
   num_workers: 4
@@ -45,8 +45,8 @@ ewl:
 wandb:
   project: "ewl-lora-noise-proj"
   entity: "sayannath235"
-  tags: ["stanford-dogs", "vit-base"]
+  tags: ["flowers102", "vit-base"]
 
 output:
-  base_dir: "outputs/vision/stanford_dogs_vit_base"
+  base_dir: "outputs/vision/flowers102_vit_base"
   save_checkpoints: False

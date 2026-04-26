@@ -43,7 +43,7 @@ ewl:
   use_lora_proxy: true
 
 wandb:
-  project: "ewl-vision-ensf619"
+  project: "ewl-lora-noise-proj"
   entity: "sayannath235"
   tags: ["cub200", "vit-base"]
 

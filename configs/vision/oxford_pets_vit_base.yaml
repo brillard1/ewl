@@ -1,10 +1,10 @@
-# Vision: Stanford Dogs + ViT-Base with LoRA
+# Vision: Oxford-IIIT Pets + ViT-Base with LoRA
 
-experiment_name: "stanford_dogs_vit_base"
-description: "EWL on Stanford Dogs breed classification with ViT-Base + LoRA"
+experiment_name: "oxford_pets_vit_base"
+description: "EWL on Oxford-IIIT Pet breed classification with ViT-Base + LoRA"
 
 dataset:
-  name: "stanford_dogs"
+  name: "oxford_pets"
   image_size: 224
   augmentation: true
   num_workers: 4
@@ -45,8 +45,8 @@ ewl:
 wandb:
   project: "ewl-lora-noise-proj"
   entity: "sayannath235"
-  tags: ["stanford-dogs", "vit-base"]
+  tags: ["oxford-pets", "vit-base"]
 
 output:
-  base_dir: "outputs/vision/stanford_dogs_vit_base"
+  base_dir: "outputs/vision/oxford_pets_vit_base"
   save_checkpoints: False

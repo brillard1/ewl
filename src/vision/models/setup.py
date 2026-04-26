@@ -50,6 +50,9 @@ def setup_vit_model(config):
         "aircraft": 100,
         "stanford_dogs": 120,
         "food101": 101,
+        "flowers102": 102,
+        "oxford_pets": 37,
+        "caltech101": 101,
     }
     num_classes = dataset_num_classes.get(
         dataset_cfg["name"], config["dataset"].get("num_classes", 1000)
