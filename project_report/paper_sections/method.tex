@@ -1,0 +1,125 @@
+\section{Method}
+\label{sec:method}
+%% -----------------------------------------------------------------------
+
+\subsection{Progress Signal}
+
+Let $\ell_i^{(t)}$ be the per-sample cross-entropy at step $t$.
+EWL maintains a per-sample EMA as a smoothed loss history.
+The EMA is updated \emph{before} computing the signal, so the velocity
+numerator uses pre-update history $\mu^{(t-1)}$:
+
+{\small
+\begin{equation}
+\begin{aligned}
+  \mu_i^{(t)} &= \alpha\,\mu_i^{(t-1)} + (1-\alpha)\,\ell_i^{(t)}, \\
+  s_i^{\text{rel}} &=
+  \underbrace{\frac{\mu_i^{(t-1)} - \ell_i^{(t)}}{|\mu_i^{(t-1)}| + \varepsilon}}_{\text{velocity}}
+  \cdot \mu_i^{(t)},
+  \qquad \varepsilon = 10^{-8}.
+\end{aligned}
+\label{eq:rel_progress}
+\end{equation}
+}
+
+Dividing by $|\mu^{(t-1)}|$ makes the signal \textbf{scale-invariant}: a 10\%
+drop from loss 3.5 and a 10\% drop from loss 0.35 yield the same velocity.
+Mastered samples have $\mu \approx \ell \approx 0$, so $s^{\text{rel}} \approx 0$.
+Mislabelled samples have $\ell \approx \mu \gg 0$ (loss never sustainably
+declines), so again $s^{\text{rel}} \approx 0$.
+Only the adaptation frontier, where $\ell < \mu$ consistently, produces a
+positive signal---this is the key property that drives implicit noise
+suppression.
+
+\subsection{LoRA Gradient Proxy and Weight Computation}
+
+To gate the signal by adapter activity, we multiply by a \textbf{LoRA gradient
+proxy} (computed after the \emph{previous} backward pass to avoid circular
+dependency):
+
+{\small
+\begin{equation}
+  g^{(t)} = \frac{1}{|\Lambda|}\sum_{\theta \in \Lambda} \|\nabla_\theta\|_F,
+  \label{eq:grad_proxy}
+\end{equation}
+}
+
+where $\Lambda$ is the set of all LoRA parameter tensors (each $A$ and $B$
+matrix individually) across all targeted layers.
+The combined signal $s_i = s_i^{\text{rel}} \times g^{(t-1)}$ is passed to a
+softmax with temperature $\tau$:
+
+{\small
+\begin{equation}
+  w_i = \frac{e^{s_i / \tau}}{\sum_j e^{s_j / \tau}}, \qquad
+  \mathcal{L}_{\text{EWL}} = \sum_i w_i \ell_i.
+  \label{eq:weights}
+\end{equation}
+}
+
+Because $z$-score normalisation before the softmax would cancel $g$ entirely
+($(g{\cdot}s - \overline{gs})/\sigma_{gs} = (s - \bar s)/\sigma_s$), the proxy
+acts as an \textbf{adaptive temperature}: $1/\tau_{\text{eff}} = g^{(t-1)}/\tau$.
+Weights are sharp during rapid adaptation and flatten toward uniform as the
+adapter converges, recovering the SFT baseline gracefully.
+A $K$-step warmup keeps weights uniform while the EMA accumulates history.
+
+\begin{algorithm}[htbp]
+\caption{EWL Training Step}
+\label{alg:ewl}
+\footnotesize
+\begin{algorithmic}[1]
+\Require Batch $\{(x_i, y_i)\}$, EMA state $\{\mu_i\}$,
+         lagged proxy $g_{\text{prev}}$, temperature $\tau$, warmup $K$
+
+\State Compute per-sample losses $\{\ell_i\}$
+
+\If{step $\le K$}
+    \textbf{return} uniform weights $1/B$
+    \Comment{Warmup: avoid noisy early reweighting}
+\EndIf
+
+\State $\mu_i^{\text{prev}} \gets \mu_i$
+
+\State $\mu_i \gets \alpha\,\mu_i + (1{-}\alpha)\,\ell_i$
+\Comment{EMA tracks smoothed loss (sample difficulty)}
+
+\State $s_i \gets \dfrac{\mu_i^{\text{prev}} - \ell_i}{|\mu_i^{\text{prev}}|+\varepsilon}
+       \cdot\;\mu_i \cdot\;g_{\text{prev}}$
+\Comment{Progress (loss drop) $\times$ difficulty $\times$ global scaling}
+
+\State $w_i \gets \operatorname{softmax}(s/\tau)$
+\Comment{Normalize into weights}
+
+\State Backprop $\mathcal{L} = \sum_i w_i\,\ell_i$
+
+\State $g_{\text{prev}} \gets \tfrac{1}{|\Lambda|}
+       \sum_{\theta \in \Lambda}\|\nabla_\theta\|_F$
+\Comment{Update proxy for next step}
+
+\end{algorithmic}
+\end{algorithm}
+
+\vspace{-1em}
+\subsection{Theoretical Grounding}
+\label{sec:theory}
+
+\paragraph{Gradient alignment.}
+By a first-order Taylor expansion, a sample's loss decreases at step $t$ if
+and only if $\nabla_\theta\ell_i^\top\mathbf{g}_t > 0$---its gradient is
+\emph{aligned} with the current batch update~\citep{katharopoulos2018notall}.
+EWL's velocity $(\mu_i^{(t-1)} - \ell_i)/|\mu_i^{(t-1)}|$ is a temporally
+smoothed estimate of this alignment without requiring explicit per-sample
+gradient computation ($O(B)$ backward passes per step).
+Upweighting aligned samples reduces gradient estimator variance, and the
+argument holds for any first-order optimiser.
+
+\paragraph{LoRA subspace alignment.}
+LoRA constrains updates to a rank-$r$ subspace $\Delta W = BA$.
+A mislabelled sample's gradient often lies \emph{outside} this subspace; the
+rank-$r$ constraint prevents the model from reconciling it, so its loss
+stagnates.
+EWL identifies this via stagnant loss velocity---the observable signature of
+subspace misalignment---without knowing the adapter geometry.
+This synergy predicts that EWL's benefit should \emph{decrease} as rank $r$
+increases and more gradient directions become reachable (\S\ref{sec:discussion}).

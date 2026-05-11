@@ -2,7 +2,9 @@
 Vision data pipeline for image classification tasks
 
 All datasets are combined from their native splits and re-split into
-80/10/10 (train/val/test) using a seeded random split.
+80/10/10 (train/val/test) using a seeded stratified split.
+This guarantees identical split proportions across every dataset regardless
+of what official splits (if any) each dataset ships with.
 """
 
 import numpy as np
@@ -10,7 +12,7 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset
 
 from .cub_dataset import CUB200Dataset, get_cub_transforms
-# Other dataset modules are imported lazily inside _load_full_dataset
+# Other dataset modules are imported lazily inside _load_all_data
 # so that missing optional dataset files don't break the import
 
 
@@ -57,7 +59,9 @@ class TransformedSubset(Dataset):
     def __init__(self, subset, transform):
         self.subset = subset
         self.transform = transform
-        # Propagate num_classes from the root dataset
+        # Propagate num_classes from the root dataset.
+        # Walk .dataset chain; also check ConcatDataset directly since it has
+        # no .dataset attribute but we set ._num_classes on it explicitly.
         root = subset
         while hasattr(root, "dataset"):
             root = root.dataset
@@ -172,85 +176,130 @@ def apply_class_imbalance(train_sub, imbalance_ratio, num_classes, seed=42):
     return kept
 
 
-def _load_official_splits(dataset_name, config):
-    """Load official train/val/test splits for each dataset.
+def _load_all_data(dataset_name, config):
+    """Load ALL available images for a dataset, combining every official split.
 
-    Splitting strategy per dataset:
-      CUB-200:       official train (5994) split 80/20 → train/val; official test (5794) used as-is.
-                     Returns (train_ds, None, test_ds) — val=None signals caller to create val from train.
-      Aircraft:      official train/val/test used directly (3334/3333/3333). No re-splitting.
-      Stanford Dogs: official train/test; no official val → same as CUB (val from train).
-      Food101:       official train/test; no official val → same as CUB (val from train).
+    This is intentionally split-agnostic: we pool every image the dataset ships
+    with (train + val + test, or trainval + test, or the single full set) so
+    that the subsequent stratified split can produce consistent 80/10/10
+    proportions regardless of how a particular dataset's authors chose to divide
+    their data.
 
     Returns:
-        (train_ds, val_ds, test_ds)
-        val_ds is None when the dataset has no official val split.
+        (full_dataset, num_classes)
+        full_dataset has a .labels attribute and ._num_classes set so that
+        _get_labels_fast and TransformedSubset work correctly.
     """
+    data_root = config["dataset"].get("data_root", "./data")
+
     if dataset_name == "cub200":
-        data_root = config["dataset"].get("data_root", "./data")
         train_ds = CUB200Dataset(root=data_root, train=True,  transform=None, download=True)
         test_ds  = CUB200Dataset(root=data_root, train=False, transform=None, download=True)
-        train_ds._num_classes = test_ds._num_classes = 200
-        return train_ds, None, test_ds  # val created from train in prepare_vision_dataset
+        full = ConcatDataset([train_ds, test_ds])
+        full._num_classes = 200
+        return full, 200
 
     elif dataset_name == "aircraft":
         from .aircraft_dataset import AircraftDataset
-        train_ds = AircraftDataset(split="train", transform=None)
-        val_ds   = AircraftDataset(split="val",   transform=None)
-        test_ds  = AircraftDataset(split="test",  transform=None)
-        train_ds._num_classes = val_ds._num_classes = test_ds._num_classes = 100
-        return train_ds, val_ds, test_ds
+        parts = [AircraftDataset(split=s, transform=None) for s in ("train", "val", "test")]
+        full = ConcatDataset(parts)
+        full._num_classes = 100
+        return full, 100
 
     elif dataset_name == "stanford_dogs":
         from .dogs_dataset import StanfordDogsDataset
-        data_root = config["dataset"].get("data_root", "./data")
         train_ds = StanfordDogsDataset(root=data_root, split="train", transform=None, download=True)
         test_ds  = StanfordDogsDataset(root=data_root, split="test",  transform=None, download=True)
-        train_ds._num_classes = test_ds._num_classes = 120
-        return train_ds, None, test_ds
+        full = ConcatDataset([train_ds, test_ds])
+        full._num_classes = 120
+        return full, 120
 
     elif dataset_name == "food101":
         from .food101_dataset import Food101Dataset
-        data_root = config["dataset"].get("data_root", "./data")
         train_ds = Food101Dataset(root=data_root, split="train", transform=None, download=True)
         test_ds  = Food101Dataset(root=data_root, split="test",  transform=None, download=True)
-        train_ds._num_classes = test_ds._num_classes = 101
-        return train_ds, None, test_ds
+        full = ConcatDataset([train_ds, test_ds])
+        full._num_classes = 101
+        return full, 101
+
+    elif dataset_name == "flowers102":
+        from .flowers102_dataset import Flowers102Dataset
+        parts = [Flowers102Dataset(root=data_root, split=s, transform=None, download=True)
+                 for s in ("train", "val", "test")]
+        full = ConcatDataset(parts)
+        full._num_classes = 102
+        return full, 102
+
+    elif dataset_name == "oxford_pets":
+        from .pets_dataset import OxfordPetsDataset
+        trainval_ds = OxfordPetsDataset(root=data_root, split="trainval", transform=None, download=True)
+        test_ds     = OxfordPetsDataset(root=data_root, split="test",     transform=None, download=True)
+        full = ConcatDataset([trainval_ds, test_ds])
+        full._num_classes = 37
+        return full, 37
+
+    elif dataset_name == "caltech101":
+        from .caltech101_dataset import Caltech101Dataset
+        full = Caltech101Dataset(root=data_root, transform=None, download=True)
+        full._num_classes = full.num_classes
+        return full, full.num_classes
 
     else:
         raise ValueError(f"Unknown vision dataset: {dataset_name}")
 
 
-def _stratified_split(dataset, val_fraction=0.2, seed=42):
-    """Split dataset into train/val preserving per-class proportions.
+def _stratified_three_way_split(dataset, train_frac=0.80, val_frac=0.10, seed=42):
+    """Stratified split of *dataset* into train / val / test subsets.
 
-    For each class, takes floor(val_fraction * n_class) samples for val
-    and the remainder for train. Returns two Subset objects.
+    For each class the samples are shuffled then assigned in order:
+        first train_frac  → train
+        next  val_frac    → val
+        remainder         → test  (≈ 1 - train_frac - val_frac)
+
+    At least one sample per class is guaranteed in each split.
+
+    Args:
+        dataset:    Dataset with a fast label path (used by _get_labels_fast).
+        train_frac: Fraction of each class assigned to training (default 0.80).
+        val_frac:   Fraction of each class assigned to validation (default 0.10).
+        seed:       Random seed for reproducibility.
+
+    Returns:
+        (train_subset, val_subset, test_subset) — all torch.utils.data.Subset.
     """
     rng = np.random.RandomState(seed)
     labels = _get_labels_fast(dataset)
     classes = np.unique(labels)
 
-    train_indices, val_indices = [], []
+    train_idx, val_idx, test_idx = [], [], []
     for c in classes:
         idx = np.where(labels == c)[0]
         rng.shuffle(idx)
-        n_val = max(1, int(len(idx) * val_fraction))
-        val_indices.extend(idx[:n_val].tolist())
-        train_indices.extend(idx[n_val:].tolist())
+        n = len(idx)
+        # Guarantee at least 1 sample per split
+        n_train = max(1, round(n * train_frac))
+        n_val   = max(1, round(n * val_frac))
+        # If the class is very small, compress to ensure all three splits get something
+        if n_train + n_val >= n:
+            n_train = max(1, n - 2)
+            n_val   = 1
+        train_idx.extend(idx[:n_train].tolist())
+        val_idx.extend(idx[n_train:n_train + n_val].tolist())
+        test_idx.extend(idx[n_train + n_val:].tolist())
 
-    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+    return (Subset(dataset, train_idx),
+            Subset(dataset, val_idx),
+            Subset(dataset, test_idx))
 
 
 def prepare_vision_dataset(config):
     """
-    Prepare vision dataset using official splits where available.
+    Prepare vision dataset with a uniform 80/10/10 stratified split.
 
-    Splitting strategy:
-      Aircraft:      official train / val / test (3334 / 3333 / 3333) — no re-splitting.
-      CUB-200:       official train split 80/20 → train/val; official test used as-is.
-      Stanford Dogs: official train split 80/20 → train/val; official test used as-is.
-      Food101:       official train split 80/20 → train/val; official test used as-is.
+    Every dataset — regardless of its official split structure — is first fully
+    pooled (all available images), then divided into train/val/test using the
+    same seeded stratified procedure. This guarantees comparable split
+    proportions across all datasets.
 
     Returns:
         train_dataset, val_dataset, test_dataset
@@ -271,35 +320,30 @@ def prepare_vision_dataset(config):
     elif dataset_name == "food101":
         from .food101_dataset import get_food101_transforms
         get_transforms = get_food101_transforms
+    elif dataset_name == "flowers102":
+        from .flowers102_dataset import get_flowers102_transforms
+        get_transforms = get_flowers102_transforms
+    elif dataset_name == "oxford_pets":
+        from .pets_dataset import get_pets_transforms
+        get_transforms = get_pets_transforms
+    elif dataset_name == "caltech101":
+        from .caltech101_dataset import get_caltech101_transforms
+        get_transforms = get_caltech101_transforms
     else:
         raise ValueError(f"Unknown vision dataset: {dataset_name}")
+    train_transform = get_transforms(image_size, augmentation=config["dataset"].get("augmentation", True))
+    eval_transform  = get_transforms(image_size, augmentation=False)
 
-    train_transform = get_transforms(
-        image_size, augmentation=config["dataset"].get("augmentation", True)
+    # --- pool all data and apply consistent 80/10/10 split --------------------
+    full_dataset, num_classes = _load_all_data(dataset_name, config)
+
+    train_sub, val_sub, test_sub = _stratified_three_way_split(
+        full_dataset, train_frac=0.80, val_frac=0.10, seed=seed
     )
-    eval_transform = get_transforms(image_size, augmentation=False)
-
-    # --- load official splits -------------------------------------------------
-    raw_train, raw_val, raw_test = _load_official_splits(dataset_name, config)
-    num_classes = getattr(raw_train, "_num_classes", 200)
-
-    if raw_val is not None:
-        # Dataset has official val split (Aircraft) — use all three as-is
-        train_sub = raw_train
-        val_sub   = raw_val
-        test_sub  = raw_test
-        print(
-            f"[DATA] {dataset_name}: official splits → "
-            f"train {len(train_sub)} / val {len(val_sub)} / test {len(test_sub)}"
-        )
-    else:
-        # No official val — stratified 80/20 split of official train by class
-        train_sub, val_sub = _stratified_split(raw_train, val_fraction=0.2, seed=seed)
-        test_sub = raw_test
-        print(
-            f"[DATA] {dataset_name}: stratified split of official train {len(raw_train)} → "
-            f"train {len(train_sub)} / val {len(val_sub)}  (80/20)  |  official test {len(test_sub)}"
-        )
+    print(
+        f"[DATA] {dataset_name}: pooled {len(full_dataset)} samples → "
+        f"train {len(train_sub)} / val {len(val_sub)} / test {len(test_sub)}  (80/10/10 stratified)"
+    )
 
     # --- optional class imbalance on train only -------------------------------
     imbalance_ratio = config["dataset"].get("imbalance_ratio", 0.0)

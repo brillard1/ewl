@@ -297,8 +297,9 @@ def main():
         )
         imb_ratio = config["dataset"].get("imbalance_ratio", 0.0)
         imb_str = f"_imb{int(imb_ratio*100)}" if imb_ratio and imb_ratio > 0 else ""
+        cond_str = "baseline" if args.condition == "lora_sft" else args.condition
         run_name = (
-            f"{config.get('experiment_name', 'vision')}_{args.condition}"
+            f"{config.get('experiment_name', 'vision')}_{cond_str}"
             f"{temp_str}{alpha_str}{rank_str}{noise_str}{imb_str}"
         )
 

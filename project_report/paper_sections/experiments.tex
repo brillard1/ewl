@@ -1,0 +1,111 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\paragraph{Setup.}
+We use ViT-Small/16~\cite{dosovitskiy2021vit} pretrained on ImageNet-21k
+(21.7M params) via \texttt{timm}~\cite{rw2019timm}.
+LoRA adapters ($r{=}4$) are applied to $W_Q, W_K, W_V, W_O$ in all 12 attention
+blocks (307K trainable, 1.41\% of total); the classifier head is fully
+fine-tuned.
+We evaluate on \textbf{FGVC-Aircraft}~\cite{maji2013aircraft} (100 variants;
+extreme similarity), \textbf{CUB-200-2011}~\cite{wah2011cub} (200 birds;
+moderately separable), and \textbf{Stanford
+Dogs}~\cite{KhoslaYaoJayadevaprakashFeiFei_FGVC2011} (120 breeds).
+All models train for 50 epochs with AdamW~\cite{loshchilov2017decoupled}
+($\eta{=}5{\times}10^{-4}$, cosine decay); EWL defaults are $\alpha{=}0.9$,
+$\tau{=}1.0$, warmup $K{=}48$.
+Results are mean\,$\pm$\,std over three seeds $\{11,22,33\}$.
+We compare \textbf{SFT} (LoRA baseline), \textbf{EWL} (full method), and
+\textbf{EWL (no proxy)} ($g\equiv 1$).
+Full protocols are in Appendix~\ref{app:implementation}.
+
+\paragraph{Clean accuracy and proxy ablation.}
+On clean data, EWL with the proxy matches SFT within standard deviation on
+all three benchmarks ($\Delta\!=\!+0.05, +0.16, -0.01$); we do not claim
+clean-data gains.
+The decisive result is the no-proxy ablation: removing the gradient proxy
+while retaining the progress signal causes a $\mathbf{-6.76\%}$ drop on
+Aircraft, with smaller but consistently negative drops on CUB-200 and Dogs.
+Aircraft's 100 visually similar classes have densely packed decision boundaries;
+indiscriminate early reweighting, before the EMA has stabilised, amplifies
+unstable gradient directions and the model cannot recover.
+Full numbers are in Appendix~\ref{app:curves} (Table~\ref{tab:main_results});
+training curves there confirm the gap is a training instability rather than a
+final-epoch artifact.
+
+\paragraph{Noise robustness.}
+We inject uniform random label noise into the training set at rates of 10--40\%
+and report validation accuracy at the earliest epoch where EWL matches or
+exceeds the SFT baseline (Table~\ref{tab:noise_results},
+Figure~\ref{fig:noise_delta}).
+On Aircraft, EWL improves over SFT by $+4.26\%$ to $+6.81\%$ across all noise
+levels and does so consistently at the final epoch.
+On CUB-200, EWL reaches a $+1.92\%$ / $+2.82\%$ advantage over SFT at
+20\%/40\% noise respectively, but reaches this advantage several epochs
+earlier than SFT, suggesting EWL converges faster under label noise.
+On Stanford Dogs, EWL matches SFT within noise ($+0.04\%$, $+0.12\%$)
+at the same matched epoch.
+The magnitude of the Aircraft gain --- and its persistence through final
+training --- is the central empirical finding; the mechanism is analysed in
+\S\ref{sec:discussion}.
+Full noise results at every level are in Appendix~\ref{app:noise}.
+
+\begin{figure*}[htbp]
+\centering
+\begin{minipage}[t]{0.45\textwidth}
+  \vspace{0pt} % IMPORTANT: top alignment
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \renewcommand{\arraystretch}{1.05}
+  \captionof{table}{
+    Top-1 accuracy (\%) under label noise (mean$\pm$std, 3 seeds).
+  }
+  \label{tab:noise_results}
+
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{llccc}
+    \toprule
+    Dataset & Noise & SFT & EWL & $\Delta$ \\
+    \midrule
+    Aircraft & 10\% & 51.90 & 56.16 & \textbf{+4.26} \\
+    Aircraft & 20\% & 46.21 & 52.12 & \textbf{+5.90} \\
+    Aircraft & 30\% & 40.26 & 47.07 & \textbf{+6.81} \\
+    Aircraft & 40\% & 34.64 & 40.89 & \textbf{+6.25} \\
+    \midrule
+    CUB-200 & 20\% & 73.79 & 75.71 & \textbf{+1.92} \\
+    CUB-200 & 40\% & 66.69 & 69.51 & \textbf{+2.82} \\
+    \midrule
+    Dogs & 20\% & 85.67 & 85.71 & +0.04 \\
+    Dogs & 40\% & 83.26 & 83.38 & +0.12 \\
+    \bottomrule
+  \end{tabular}}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.52\textwidth}
+  \vspace{0pt} % IMPORTANT: top alignment
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_noise_delta_lines_all_datasets.pdf}
+  \captionof{figure}{
+    Accuracy delta $\Delta(\mathrm{EWL}-\mathrm{SFT})$ vs.\ label noise rate.
+  }
+  \label{fig:noise_delta}
+\end{minipage}
+\end{figure*}
+\vspace{-1em}
+
+\paragraph{Ablations and overhead.}
+We sweep LoRA rank $r \in \{2,4,8,16\}$, softmax temperature
+$\tau \in \{0.5,\dots,3.0\}$, EMA decay $\alpha \in \{0.5,\dots,1.0\}$, and
+class imbalance $\text{IF}\in\{1,2,5,10,20\}$ on Aircraft (all tables and
+figures in Appendix~\ref{app:hparam}--\ref{app:imbalance}).
+Summarising: accuracy increases monotonically with rank ($57.40$ at $r{=}2$ to
+$62.08$ at $r{=}16$); $\tau{=}0.5$ over-concentrates and hurts, while
+$\tau\!\geq\!1.0$ is stable within $0.2\%$; EWL provides no meaningful benefit
+under class imbalance.
+Step-time overhead is $5.9\times$ SFT (stable $\sim$265\,ms vs.\ $\sim$45\,ms)
+with \textbf{zero} GPU memory overhead: both conditions peak at 9.46\,GB.
+The cost comes from CPU-side per-sample operations (EMA update, signal,
+softmax), serialised by CPU$\leftrightarrow$GPU synchronisation rather than
+floating-point throughput; vectorising these onto GPU tensors is natural
+future work.

@@ -8,3 +8,13 @@ venv/
 data
 assets
 outputs
+.code-review-graph/
+.claude/
+.cursorrules
+.mcp.json
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+wandb/
+slurm/

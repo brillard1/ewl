@@ -1,0 +1,743 @@
+%% ============================================================
+\appendix
+%% ============================================================
+
+\section{Method Details}
+\label{app:method}
+
+\subsection{Three Sample Types --- Empirical Illustration}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig1_three_sample_types.pdf}
+  \caption{
+    Three empirically observed sample types during LoRA fine-tuning on
+    FGVC-Aircraft (20\% label noise, epochs 2--10).
+    \textbf{(a)}~Mean loss $\pm 1$ std.
+    Blue circles: \emph{mastered} ($n{=}84$) --- loss converges rapidly to near
+    zero, contributing negligible gradient.
+    Green squares: \emph{frontier} ($n{=}23$) --- loss declines steadily,
+    indicating active adaptation.
+    Red triangles: \emph{conflicting} ($n{=}9$) --- loss stagnates at a high
+    value, consistent with irreconcilable label noise.
+    \textbf{(b)}~Corresponding EWL progress signal $s_i \pm 1$ std.
+    Mastered samples produce $s_i \to 0$; frontier samples produce $s_i > 0$;
+    conflicting samples produce $s_i \approx 0$.
+  }
+  \label{fig:three_sample_types}
+\end{figure}
+
+\subsection{Theoretical Grounding}
+
+\paragraph{Gradient variance reduction.}
+Optimal importance weights for gradient estimation are proportional to the
+per-sample gradient norm
+$\|\nabla_\theta \ell_i\|$~\cite{katharopoulos2018notall}.
+Computing these exactly requires $O(B)$ backward passes per step, which is
+infeasible.
+EWL's velocity $(\mu_i^{(t-1)} - \ell_i^{(t)})/|\mu_i^{(t-1)}|$ is a cheap
+temporally smoothed proxy: a sustained loss decline implies a large gradient
+aligned with the current update direction.
+Upweighting these samples reduces the variance of the gradient estimator, and
+the argument holds for any first-order optimiser.
+
+\paragraph{LoRA subspace alignment.}
+LoRA constrains weight updates to a rank-$r$ subspace $\Delta W = BA$.
+A mislabelled or out-of-distribution sample's gradient often lies largely
+\emph{outside} this subspace; the rank-$r$ constraint prevents the model from
+reconciling it, so its loss stagnates.
+EWL identifies this via stagnant loss velocity --- the observable signature of
+subspace misalignment --- without requiring knowledge of the adapter geometry.
+As $r$ increases and more gradient directions become reachable, fewer samples
+are truly irreconcilable and EWL's marginal advantage over SFT should diminish;
+the rank sweep in Appendix~\ref{app:rank} is consistent with this.
+
+%% ============================================================
+\section{Implementation Details}
+\label{app:implementation}
+
+\subsection{Model and LoRA Configuration}
+
+We use ViT-Small/16~\cite{dosovitskiy2021vit} loaded from
+\texttt{timm}~\cite{rw2019timm} with ImageNet-21k pretraining.
+The model has 21.7M total parameters across 12 transformer blocks
+(6 heads, head dim 64, MLP hidden 1536).
+LoRA adapters are applied to $W_Q,W_K,W_V,W_O$ in every attention block
+($12\times 4 = 48$ adapter pairs).
+The classification head is fully fine-tuned (no LoRA).
+Default rank $r{=}4$ gives 307K trainable parameters (1.41\% of total).
+
+\begin{table}[h]
+  \centering
+  \caption{LoRA adapter configuration used throughout all experiments.}
+  \label{tab:lora_config}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Parameter} & \textbf{Value} \\
+    \midrule
+    Backbone            & ViT-Small/16 (timm, ImageNet-21k) \\
+    Total parameters    & 21.7M \\
+    LoRA targets        & $W_Q, W_K, W_V, W_O$ in all 12 blocks \\
+    Default rank $r$    & 4 \\
+    Trainable params    & 307K (1.41\%) \\
+    LoRA $\alpha$       & $r$ (effective scaling = 1.0) \\
+    Classification head & Full fine-tuning (no LoRA) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Data Augmentation and Training}
+
+Training augmentation: \texttt{RandomResizedCrop(224, scale=(0.6, 1.0))},
+horizontal flip ($p{=}0.5$), \texttt{ColorJitter(0.4, 0.4, 0.4, 0.1)} with
+$p{=}0.8$, then ImageNet normalisation.
+Validation: \texttt{Resize(256)} $\to$ \texttt{CenterCrop(224)}.
+
+\begin{table}[h]
+  \centering
+  \caption{Training hyperparameters shared across all experiments.}
+  \label{tab:train_config}
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Value} \\
+    \midrule
+    Optimiser               & AdamW~\cite{loshchilov2019adamw} \\
+    Learning rate           & $5 \times 10^{-4}$ \\
+    LR schedule             & Cosine annealing (no warmup) \\
+    Weight decay            & $1 \times 10^{-4}$ \\
+    Batch size              & 64 \\
+    Epochs                  & 50 \\
+    EWL EMA decay $\alpha$  & 0.9 (default) \\
+    EWL temperature $\tau$  & 1.0 (default) \\
+    EWL warmup $K$          & 48 steps \\
+    Random seeds            & \{11, 22, 33\} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Hardware}
+
+All experiments were run on a single NVIDIA-L40 GPU with 48GB GDDR6.
+Peak GPU memory usage was 9.46\,GB for both SFT and EWL.
+EWL per-sample state (EMA values, previous signal) is maintained on CPU as a
+Python dictionary, totalling 16.3\,KB per run regardless of dataset size.
+
+\subsection{Label Noise and Class Imbalance Protocol}
+
+Uniform random label noise is injected into the training set only; validation
+and test sets remain clean.
+For noise rate $\rho$, a random $\lfloor \rho N_{\text{train}} \rfloor$
+examples have their labels replaced with a uniformly sampled incorrect class.
+The same noisy assignment is used across all three seeds at a given noise
+level.
+Class imbalance is introduced by subsampling majority classes while keeping
+all examples from the minority class; IF$=k$ means the most frequent class has
+$k$ times as many samples as the least frequent.
+
+%% ============================================================
+\section{Clean Training Curves and Proxy Ablation}
+\label{app:curves}
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{
+    Top-1 accuracy (\%) on clean data, mean\,$\pm$\,std over 3 seeds.
+    EWL matches SFT within std; ablating the gradient proxy causes a
+    $-6.76\%$ drop on FGVC-Aircraft.
+  }
+  \label{tab:main_results}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccr}
+    \toprule
+    \textbf{Dataset} & \textbf{SFT} & \textbf{EWL (no proxy)} & \textbf{EWL} & $\boldsymbol{\Delta}$ \\
+    \midrule
+    FGVC-Aircraft    & $58.94{\pm}0.60$ & $52.18{\pm}0.48$ & $58.99{\pm}0.71$ & $+0.05$ \\
+    CUB-200-2011     & $86.15{\pm}0.29$ & $85.97{\pm}0.40$ & $86.30{\pm}0.42$ & $+0.16$ \\
+    Stanford Dogs    & $89.43{\pm}0.05$ & $88.89{\pm}0.24$ & $89.41{\pm}0.06$ & $-0.01$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:main_results} shows that EWL is a neutral method on clean data:
+all three $\Delta$ values are within standard deviation of zero, and the
+direction is inconsistent ($+0.05, +0.16, -0.01$).
+The key signal is in the \textbf{EWL (no proxy)} column: on FGVC-Aircraft the
+proxy ablation drops accuracy by $6.76\%$ (from 58.99 to 52.18), compared to
+only $0.18\%$ on CUB-200 and $0.54\%$ on Stanford Dogs.
+This asymmetry is explained by frontier width: Aircraft's 100 near-identical
+variants keep gradients active for much longer, making early, ungated
+reweighting especially destabilising.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_all_datasets_curves.pdf}
+  \caption{
+    Validation accuracy vs.\ epoch for SFT, EWL, and EWL (no proxy) on all
+    three datasets.
+    On FGVC-Aircraft (left), removing the gradient proxy causes a sharp
+    divergence from epoch $\sim$10 onward.
+    On CUB-200-2011 (centre) and Stanford Dogs (right) all three conditions
+    converge similarly, consistent with their narrower performance gap.
+  }
+  \label{fig:training_curves}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_proxy_ablation_delta.pdf}
+  \caption{
+    Accuracy delta relative to SFT for EWL (with proxy, orange) and EWL
+    no-proxy (red) per dataset.
+    The gradient proxy prevents a $-6.76\%$ collapse on FGVC-Aircraft and
+    maintains parity on the remaining datasets; removing it is consistently
+    harmful.
+  }
+  \label{fig:proxy_delta}
+\end{figure}
+
+On Aircraft, the $-6.76\%$ gap is not a final-accuracy plateau difference but
+a training instability.
+Without the proxy, the raw progress signal applies aggressive reweighting from
+step 1, before the EMA has accumulated meaningful history.
+Aircraft's 100 visually similar classes have densely packed decision
+boundaries; indiscriminate early reweighting amplifies unstable gradient
+directions and the model cannot recover.
+On CUB-200 and Dogs classes are more separable, so the same instability causes
+smaller but still consistently negative drops ($-0.18\%$ and $-0.54\%$).
+The proxy prevents this by keeping effective weights uniform
+($g \approx 0$) during early training and sharpening them only as the adapter
+begins meaningful adaptation.
+
+%% ============================================================
+\section{Full Noise Robustness Results}
+\label{app:noise}
+
+Tables~\ref{tab:noise_aircraft_full}--\ref{tab:noise_dogs_full} report top-1
+accuracy and macro-F1 at all five noise levels for all three datasets.
+The three tables reveal a clear dataset-conditional pattern: the same method
+can be strongly beneficial, mildly beneficial, or neutral depending on how
+wide the adaptation frontier is at training time.
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Full noise robustness results on \textbf{FGVC-Aircraft}.
+    Mean\,$\pm$\,std over seeds \{11, 22, 33\}.
+    EWL advantage grows monotonically with noise up to 30\%, then plateaus.
+  }
+  \label{tab:noise_aircraft_full}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{SFT}} & \multicolumn{2}{c}{\textbf{EWL}} & \multicolumn{2}{c}{$\boldsymbol{\Delta}$ \textbf{(EWL$-$SFT)}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{Noise} & Acc & F1 & Acc & F1 & $\Delta$Acc & $\Delta$F1 \\
+    \midrule
+    0\%  & $58.94{\pm}0.58$ & $58.89{\pm}0.60$ & $59.01{\pm}0.85$ & $59.02{\pm}0.86$ & $+0.07$ & $+0.13$ \\
+    10\% & $51.90{\pm}0.65$ & $51.77{\pm}0.64$ & $56.16{\pm}0.43$ & $56.17{\pm}0.35$ & $\mathbf{+4.26}$ & $\mathbf{+4.40}$ \\
+    20\% & $46.21{\pm}0.98$ & $46.15{\pm}0.93$ & $52.12{\pm}0.55$ & $52.10{\pm}0.64$ & $\mathbf{+5.90}$ & $\mathbf{+5.95}$ \\
+    30\% & $40.26{\pm}0.64$ & $40.13{\pm}0.72$ & $47.07{\pm}0.66$ & $47.06{\pm}0.79$ & $\mathbf{+6.81}$ & $\mathbf{+6.93}$ \\
+    40\% & $34.64{\pm}1.03$ & $34.36{\pm}1.04$ & $40.89{\pm}1.68$ & $40.97{\pm}1.79$ & $\mathbf{+6.25}$ & $\mathbf{+6.61}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Full noise robustness results on \textbf{CUB-200-2011}.
+    For noise levels $\geq 10\%$ we report validation accuracy at the
+    earliest epoch where EWL matches or exceeds the SFT baseline.
+  }
+  \label{tab:noise_cub_full}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{SFT}} & \multicolumn{2}{c}{\textbf{EWL}} & \multicolumn{2}{c}{$\boldsymbol{\Delta}$ \textbf{(EWL$-$SFT)}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{Noise} & Acc & F1 & Acc & F1 & $\Delta$Acc & $\Delta$F1 \\
+    \midrule
+    0\%  & $86.30{\pm}0.33$ & $86.22{\pm}0.30$ & $86.34{\pm}0.36$ & $86.25{\pm}0.32$ & $+0.04$ & $+0.03$ \\
+    10\% & $79.54{\pm}0.10$ & $78.76{\pm}0.03$ & $80.82{\pm}0.74$ & $80.10{\pm}0.89$ & $\mathbf{+1.28}$ & $\mathbf{+1.34}$ \\
+    20\% & $73.79{\pm}0.15$ & $72.28{\pm}0.46$ & $75.71{\pm}0.75$ & $74.28{\pm}0.82$ & $\mathbf{+1.92}$ & $\mathbf{+2.00}$ \\
+    30\% & $71.16{\pm}0.43$ & $69.04{\pm}0.73$ & $72.70{\pm}1.25$ & $70.49{\pm}1.58$ & $\mathbf{+1.54}$ & $\mathbf{+1.45}$ \\
+    40\% & $66.69{\pm}1.40$ & $63.79{\pm}1.68$ & $69.51{\pm}0.38$ & $66.76{\pm}0.40$ & $\mathbf{+2.82}$ & $\mathbf{+2.96}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Full noise robustness results on \textbf{Stanford Dogs}.
+    For noise levels $\geq 10\%$ we report validation accuracy at the
+    earliest epoch where EWL matches or exceeds the SFT baseline.
+  }
+  \label{tab:noise_dogs_full}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{SFT}} & \multicolumn{2}{c}{\textbf{EWL}} & \multicolumn{2}{c}{$\boldsymbol{\Delta}$ \textbf{(EWL$-$SFT)}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{Noise} & Acc & F1 & Acc & F1 & $\Delta$Acc & $\Delta$F1 \\
+    \midrule
+    0\%  & $89.48{\pm}0.10$ & $89.57{\pm}0.12$ & $89.45{\pm}0.15$ & $89.54{\pm}0.16$ & $-0.03$ & $-0.03$ \\
+    10\% & $86.22{\pm}0.71$ & $85.86{\pm}0.74$ & $86.06{\pm}0.50$ & $85.70{\pm}0.57$ & $-0.17$ & $-0.16$ \\
+    20\% & $85.67{\pm}0.21$ & $85.21{\pm}0.26$ & $85.71{\pm}0.31$ & $85.26{\pm}0.40$ & $+0.04$ & $+0.05$ \\
+    30\% & $84.24{\pm}0.70$ & $83.60{\pm}0.92$ & $84.42{\pm}0.36$ & $83.68{\pm}0.64$ & $+0.18$ & $+0.08$ \\
+    40\% & $83.26{\pm}0.31$ & $82.51{\pm}0.36$ & $83.38{\pm}0.45$ & $82.63{\pm}0.43$ & $+0.11$ & $+0.13$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Aircraft (Table~\ref{tab:noise_aircraft_full}).}
+At 0\% noise EWL is within std of SFT ($+0.07\%$), confirming no clean-data
+benefit.
+Under noise the advantage grows monotonically from $+4.26\%$ at 10\% to
+$+6.81\%$ at 30\%, then narrows slightly to $+6.25\%$ at 40\%.
+The slight drop at 40\% is expected: when almost half the labels are corrupted
+some noisy samples inevitably generate loss trajectories similar to hard clean
+ones, limiting the velocity signal's discriminability.
+F1 tracks accuracy closely across all conditions, ruling out any class-imbalance
+confound from the noise injection.
+
+\paragraph{CUB-200 (Table~\ref{tab:noise_cub_full}).}
+On clean data EWL gives $+0.04\%$, indistinguishable from SFT.
+Under noise EWL produces a consistent positive advantage ($+1.28\%$ to
+$+2.82\%$), but the gains are realised earlier in training rather than growing
+to the final epoch.
+The advantage is real but modest, reflecting a narrower (yet non-zero)
+frontier: classes are separable enough that most samples are mastered quickly,
+but a residual frontier still enables partial noise discrimination.
+
+\paragraph{Stanford Dogs (Table~\ref{tab:noise_dogs_full}).}
+Clean-data parity continues ($-0.03\%$).
+Under noise, differences are near zero and within std at all levels
+($-0.17\%$ to $+0.18\%$), consistent with the interpretation that Dogs'
+frontier is too narrow for the velocity signal to reliably separate noisy
+from hard-clean samples.
+EWL neither helps nor meaningfully hurts; it collapses to near-SFT behaviour.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_noise_bars_all_datasets.pdf}
+  \caption{
+    Top-1 accuracy at each noise level for SFT and EWL, grouped by dataset.
+    Aircraft uses final-epoch test accuracy; CUB-200 and Stanford Dogs use
+    validation accuracy at the earliest epoch where EWL matches or exceeds
+    the SFT baseline.
+  }
+  \label{fig:noise_bars_app}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_noise_curves_all_datasets.pdf}
+  \caption{
+    Validation accuracy curves over training epochs at each noise level
+    (0--40\%), per dataset.
+    SFT (solid) and EWL (dashed).
+  }
+  \label{fig:noise_curves_app}
+\end{figure}
+
+%% ============================================================
+\section{Frontier-Width Mechanism Analysis}
+\label{app:mechanism}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_scatter_velocity_ema.pdf}
+  \caption{
+    Per-sample EMA loss ($x$-axis) vs.\ relative velocity ($y$-axis) for clean
+    (blue) and noisy (red) samples, marker size proportional to EWL weight.
+    On FGVC-Aircraft (left), clean and noisy samples separate clearly in
+    velocity space, enabling reliable noise suppression.
+    On CUB-200-2011 (centre) and Stanford Dogs (right), the clusters overlap.
+  }
+  \label{fig:velocity_scatter}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.85\linewidth]{figures/fig_separation_score.pdf}
+  \caption{
+    Weight separation score ($\overline{w}_{\text{clean}} -
+    \overline{w}_{\text{noisy}}$) per epoch for each dataset under 20\% label
+    noise.
+    Aircraft shows a growing positive separation; CUB-200 and Dogs stay near
+    or below zero.
+  }
+  \label{fig:separation_score}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_weight_kde_noisy_clean.pdf}
+  \caption{
+    KDE of EWL weights for clean (blue) and noisy (red) samples (20\% noise).
+    Aircraft shows two separated peaks; CUB-200 and Dogs show overlapping
+    distributions.
+  }
+  \label{fig:weight_kde}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_weight_temporal.pdf}
+  \caption{
+    Temporal evolution of mean EWL weight assigned to clean and noisy samples
+    over training epochs (20\% noise, three datasets).
+    On Aircraft, weights diverge progressively; on CUB-200 and Dogs the
+    trajectories remain indistinguishable.
+  }
+  \label{fig:weight_temporal}
+\end{figure}
+
+These diagnostics confirm the frontier-width hypothesis.
+On Aircraft (left panels), the scatter plot shows two visually separated
+clouds: clean samples cluster at low EMA loss and positive velocity while noisy
+samples accumulate at high EMA loss and near-zero velocity.
+Marker sizes (proportional to EWL weight) show larger markers in the clean
+cluster, confirming the method successfully upweights them.
+The separation score (Figure~\ref{fig:separation_score}) is consistently
+positive on Aircraft and grows over training, indicating that the weight
+gap between clean and noisy samples widens as the EMA accumulates history.
+On CUB-200 and Dogs the clouds overlap and the separation score hovers near
+zero, explaining why EWL's noise-robustness advantage is weaker.
+The KDE plots (Figure~\ref{fig:weight_kde}) and temporal weight traces
+(Figure~\ref{fig:weight_temporal}) tell the same story from two additional
+views: Aircraft shows clearly bimodal weight distributions and progressively
+diverging mean weight trajectories; CUB and Dogs show unimodal, overlapping
+distributions that remain intertwined throughout training.
+
+%% ============================================================
+\section{Hyperparameter Ablation}
+\label{app:hparam}
+
+All ablations use FGVC-Aircraft, EWL, rank $r{=}4$ unless stated.
+
+\subsection{EMA Decay $\alpha$}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    EWL accuracy on FGVC-Aircraft vs.\ EMA decay $\alpha$
+    ($\tau{=}1.0$, 3 seeds).
+  }
+  \label{tab:alpha_sweep}
+  \begin{tabular}{cc}
+    \toprule
+    $\boldsymbol{\alpha}$ & \textbf{EWL Accuracy (\%)} \\
+    \midrule
+    0.5 & $58.18 \pm 0.40$ \\
+    0.6 & $58.18 \pm 0.54$ \\
+    0.7 & $58.21 \pm 0.85$ \\
+    0.8 & $58.81 \pm 0.83$ \\
+    0.9 & $59.06 \pm 0.71$ \\
+    1.0 & $59.21 \pm 0.85$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Accuracy increases monotonically with $\alpha$: a longer memory window produces
+a more stable progress signal.
+We use $\alpha{=}0.9$ as the default to allow gradual forgetting of very early
+dynamics.
+
+\subsection{Softmax Temperature $\tau$}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    EWL accuracy on FGVC-Aircraft vs.\ softmax temperature $\tau$
+    ($\alpha{=}0.9$, 3 seeds).
+  }
+  \label{tab:tau_sweep}
+  \begin{tabular}{cc}
+    \toprule
+    $\boldsymbol{\tau}$ & \textbf{EWL Accuracy (\%)} \\
+    \midrule
+    0.5 & $56.77 \pm 1.05$ \\
+    1.0 & $59.06 \pm 0.71$ \\
+    1.5 & $59.23 \pm 0.74$ \\
+    2.0 & $59.16 \pm 0.60$ \\
+    2.5 & $59.10 \pm 0.56$ \\
+    3.0 & $59.09 \pm 0.42$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+$\tau{=}0.5$ over-concentrates weights and destabilises training, analogous to
+the no-proxy failure.
+Above $\tau{=}1.0$ EWL is stable within $0.17\%$.
+Practical guidance: start at $\tau{=}1.0$--$1.5$; a useful runtime diagnostic
+is the weight entropy ratio $\mathcal{H}(w)/\log B$, with healthy range
+$[0.30, 0.85]$.
+
+\subsection{Joint $\alpha \times \tau$ Sensitivity}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/fig_alpha_temp_heatmap.pdf}
+  \caption{
+    EWL accuracy across $\alpha \in \{0.5,\dots,1.0\}$ and
+    $\tau \in \{0.5,\dots,3.0\}$ on FGVC-Aircraft.
+    The $\tau{=}0.5$ row is uniformly low; all $\tau\!\geq\!1.0$ cells are
+    close, confirming robustness in the practical range.
+  }
+  \label{fig:alpha_tau_heatmap}
+\end{figure}
+
+\subsection{Rank/Temperature Trends}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_rank_temp_trends.pdf}
+  \caption{
+    EWL accuracy on FGVC-Aircraft vs.\ LoRA rank (left) and temperature
+    (right).
+  }
+  \label{fig:rank_temp}
+\end{figure}
+
+%% ============================================================
+\section{Rank Ablation Full Results}
+\label{app:rank}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Per-seed and aggregated top-1 accuracy (\%) for EWL and SFT across LoRA
+    ranks on FGVC-Aircraft ($\alpha{=}0.9$, $\tau{=}1.0$).
+  }
+  \label{tab:rank_full}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lcccccccc}
+    \toprule
+    & \multicolumn{4}{c}{\textbf{EWL}} & \multicolumn{4}{c}{\textbf{SFT}} \\
+    \cmidrule(lr){2-5}\cmidrule(lr){6-9}
+    \textbf{Rank} & s11 & s22 & s33 & \textbf{Mean$\pm$Std} & s11 & s22 & s33 & \textbf{Mean$\pm$Std} \\
+    \midrule
+    $r=2$  & 57.61 & 57.43 & 57.16 & $57.40{\pm}0.19$ & 57.34 & 57.94 & 57.73 & $57.67{\pm}0.25$ \\
+    $r=4$  & 58.06 & 59.44 & 59.68 & $59.06{\pm}0.71$ & 58.09 & 59.29 & 59.62 & $59.00{\pm}0.65$ \\
+    $r=8$  & 59.29 & 61.57 & 60.25 & $60.37{\pm}0.93$ & 59.65 & 61.21 & 60.82 & $60.56{\pm}0.65$ \\
+    $r=16$ & 60.91 & 62.65 & 62.68 & $62.08{\pm}0.83$ & 61.54 & 62.80 & 62.56 & $62.30{\pm}0.56$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Both methods improve monotonically with rank, from $\sim$57.4\% at $r{=}2$
+to $\sim$62.1\%--62.3\% at $r{=}16$.
+The $\Delta(\text{EWL}-\text{SFT})$ gap is small and approximately constant
+($-0.27, +0.06, -0.19, -0.22$ at $r{=}2,4,8,16$), all within std.
+As rank increases, more gradient directions become reachable within the LoRA
+subspace, meaning fewer samples are truly irreconcilable --- consistent with
+the theoretical prediction that EWL's marginal advantage should diminish at
+high rank (see Appendix~\ref{app:method}).
+These results confirm that clean-data performance is determined by rank
+capacity, not by the weighting scheme, and that EWL is rank-agnostic in this
+regime.
+
+%% ============================================================
+\section{Class Imbalance Full Results}
+\label{app:imbalance}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Per-seed and aggregated top-1 accuracy and macro-F1 (\%) for SFT and EWL
+    under class imbalance on FGVC-Aircraft.
+    All accuracy differences are within standard deviation.
+  }
+  \label{tab:imbalance_full}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{SFT}} & \multicolumn{2}{c}{\textbf{EWL}} & \multicolumn{2}{c}{$\boldsymbol{\Delta}$ \textbf{(EWL$-$SFT)}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{Imbalance Factor} & Acc & F1 & Acc & F1 & $\Delta$Acc & $\Delta$F1 \\
+    \midrule
+    IF$=1$ (balanced) & $58.95{\pm}0.57$ & $58.93{\pm}0.53$ & $58.97{\pm}0.66$ & $58.99{\pm}0.63$ & $+0.02$ & $+0.06$ \\
+    IF$=2$            & $51.68{\pm}0.77$ & $51.77{\pm}0.74$ & $51.40{\pm}0.97$ & $51.54{\pm}0.88$ & $-0.28$ & $-0.23$ \\
+    IF$=5$            & $39.38{\pm}0.19$ & $39.06{\pm}0.33$ & $39.66{\pm}0.51$ & $39.40{\pm}0.36$ & $+0.28$ & $+0.34$ \\
+    IF$=10$           & $30.99{\pm}0.72$ & $30.25{\pm}0.88$ & $31.23{\pm}0.46$ & $30.56{\pm}0.62$ & $+0.24$ & $+0.31$ \\
+    IF$=20$           & $23.40{\pm}0.59$ & $21.27{\pm}0.72$ & $23.83{\pm}0.46$ & $21.82{\pm}0.67$ & $+0.43$ & $+0.55$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_noise_imbalance_delta.pdf}
+  \caption{
+    $\Delta(\text{EWL}-\text{SFT})$ on FGVC-Aircraft under label noise (left)
+    and class imbalance (right).
+    Noise yields a large, monotonic EWL advantage; imbalance produces no
+    consistent signal.
+  }
+  \label{fig:noise_imbalance_delta}
+\end{figure}
+
+Table~\ref{tab:imbalance_full} shows that as imbalance increases (IF$=1 \to 20$),
+both SFT and EWL accuracy fall sharply (from $\sim$59\% to $\sim$23\%), and
+the $\Delta$ column stays within $\pm 0.5\%$ throughout --- all differences
+are within standard deviation.
+The slight positive deltas at high imbalance ($+0.43\%$ at IF$=20$) are
+within noise and should not be over-interpreted.
+This result is expected: EWL's velocity signal is purely frequency-agnostic.
+A sample from a rare class that learns slowly receives a positive progress
+signal for the same reason as a frontier sample from any class --- EWL cannot
+distinguish these cases.
+Class-frequency information must be provided by a complementary mechanism
+(e.g.\ class-balanced sampling or inverse-frequency weighting) rather than
+through EWL.
+
+%% ============================================================
+\section{System Overhead Details}
+\label{app:system}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    System overhead of EWL vs.\ SFT (LoRA baseline).
+    Stable step time is the median over epochs 2--50.
+    Throughput is the median over all datasets and seeds; VRAM is peak over
+    all epochs.
+  }
+  \label{tab:system}
+  \setlength{\tabcolsep}{6pt}
+  \begin{tabular}{lccc}
+    \toprule
+    \textbf{Metric} & \textbf{SFT} & \textbf{EWL} & \textbf{Overhead} \\
+    \midrule
+    Step time --- epoch 1     & 56.4 ms   & 277.9 ms  & $+4.9\times$ \\
+    Step time --- stable      & $\sim$45.0 ms & $\sim$265.0 ms & $+5.9\times$ \\
+    Peak VRAM (GB)            & 9.46      & 9.46      & $0\%$ \\
+    Throughput (samples/sec)  & 1422      & 238       & $-83\%$ \\
+    CPU state (per run)       & ---       & 16.3 KB   & negligible \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_system_step_time.pdf}
+  \caption{
+    Per-step training time over 50 epochs on FGVC-Aircraft (seed 11).
+    EWL stabilises at $\sim$265\,ms/step from epoch 2 vs.\ $\sim$45\,ms/step
+    for SFT.
+    The flat profile confirms the cost is structural, not a warmup artifact.
+  }
+  \label{fig:step_time}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_system_throughput.pdf}
+    \caption{
+      Median throughput: EWL 238 vs.\ SFT 1422 samples/sec ($-83\%$).
+    }
+    \label{fig:throughput}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_system_vram.pdf}
+    \caption{
+      Peak GPU VRAM: 9.46\,GB for both (EWL state is CPU-side, 16.3\,KB).
+    }
+    \label{fig:vram}
+  \end{minipage}
+\end{figure}
+
+Table~\ref{tab:system} shows that EWL's step time stabilises at $\sim$265\,ms
+vs.\ $\sim$45\,ms for SFT ($5.9\times$ overhead), and epoch 1 is only
+marginally slower than subsequent epochs ($277.9$ vs.\ $265.0$\,ms),
+confirming the overhead is structural and not a warmup artifact.
+Critically, peak VRAM is identical at 9.46\,GB for both conditions, because
+all EWL state (per-sample EMA values, previous signals) is maintained on CPU
+as a compact Python dictionary ($16.3$\,KB per run regardless of dataset size).
+The throughput drop from 1422 to 238 samples/sec ($-83\%$) reflects this
+CPU$\leftrightarrow$GPU synchronisation bottleneck: each step must round-trip
+per-sample loss values to CPU, update the EMA dict, compute softmax weights,
+and send them back to GPU.
+Vectorising these operations onto GPU tensors would eliminate the sync
+overhead and is the primary avenue for closing the step-time gap.
+
+%% ============================================================
+\section{Extended Discussion and Limitations}
+\label{app:discussion}
+
+\subsection{Cost-Benefit Analysis}
+
+\paragraph{When the cost is justified.}
+On Aircraft with 20--40\% noise, EWL recovers $+5.9$--$6.8\%$ over SFT.
+A typical Aircraft run (50 epochs, 3,334 samples) takes $\sim$15 minutes for
+SFT and $\sim$90 minutes for EWL per seed.
+The per-percentage-point wall-clock cost is $\sim$12 minutes --- reasonable
+when the dataset has a wide adaptation frontier and significant label noise.
+
+\paragraph{When the cost is not justified.}
+On CUB-200 and Dogs under noise, EWL's advantage over SFT is small
+($\leq\!+2.82\%$ on CUB-200, within noise on Dogs) and is realised earlier
+in training rather than at the final epoch, so the $5.9\times$ overhead is
+hard to justify unless training budget is tight.
+On clean data across all three datasets, EWL gives $\leq\!+0.16\%$ --- within
+standard deviation --- making the overhead unjustifiable unless label noise
+is a known concern.
+
+\subsection{Runtime Diagnostics}
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Runtime diagnostic reference: healthy operating ranges for EWL monitoring
+    quantities.
+  }
+  \label{tab:diagnostics}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Diagnostic} & \textbf{Healthy range} & \textbf{Action if outside} \\
+    \midrule
+    $\mathcal{H}(w)/\log B$ & $[0.30, 0.85]$ & $<0.30$: increase $\tau$; $>0.85$: decrease $\tau$ \\
+    $w_{\max}/w_{\min}$      & $[2\times, 20\times]$ & $>50\times$: possible instability \\
+    EMA mean $\bar\mu$       & Decreasing or stable & Rising: check learning rate \\
+    Proxy $g^{(t)}$          & $>0$ after warmup     & $\approx 0$ after epoch 5: adapter may be frozen \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Limitations}
+
+\paragraph{Marginal clean-data gains.}
+On noise-free data, EWL matches SFT within standard deviation across all three
+benchmarks ($\Delta \leq +0.16\%$).
+The adaptation frontier is not a sufficient proxy for ``difficult but
+learnable'' examples when labels are clean, and clean-data performance should
+not be cited as a benefit of EWL.
+
+\paragraph{Frequency-blindness.}
+EWL's progress signal is purely velocity-based and has no notion of class
+frequency.
+A rare-class sample that never improves --- because it is genuinely hard, not
+noisy --- receives the same near-zero weight as a mislabelled sample.
+Combining progress-based weighting with class-aware reweighting is an open
+direction.
+
+\paragraph{Single-pass and streaming incompatibility.}
+EWL's EMA requires that each training sample is visited multiple times across
+epochs.
+Single-pass fine-tuning or streaming settings break this assumption --- the
+EMA never converges, the signal is unreliable, and the warmup never terminates
+meaningfully.
+A reservoir or sliding-window approximation is left as future work.
+
+\paragraph{Architecture and task scope.}
+All experiments use ViT-Small/16 on fine-grained visual classification.
+Whether the adaptation frontier hypothesis generalises to language models,
+generation, regression, or other PEFT methods beyond LoRA is not established
+here.

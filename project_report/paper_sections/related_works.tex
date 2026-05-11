@@ -1,0 +1,33 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Training dynamics.}
+Arpit~et~al.~\cite{arpit2017closer} showed networks fit simple patterns before
+memorising noise; Toneva~et~al.~\cite{toneva2019empirical} identified
+\emph{forgettable} examples as disproportionately informative; and Dataset
+Cartography~\cite{swayamdipta2020dataset} formalised an \emph{ambiguous}
+stratum along confidence/variability axes.
+EWL recovers an online analogue of this stratum in the same training run, with
+no preliminary pass.
+
+\paragraph{Curriculum, self-paced, and noise-robust learning.}
+Curriculum~\cite{bengio2009curriculum} and self-paced
+learning~\cite{kumar2010self} weight by loss \emph{magnitude}, conflating
+frontier with noise.
+MentorNet~\cite{jiang2018mentornet}, Co-teaching~\cite{han2018coteaching},
+OHEM~\cite{shrivastava2016ohem}, and Focal Loss~\cite{lin2017focal} either
+require a clean reference set or rely on magnitude heuristics.
+EWL instead uses loss \emph{velocity} --- the relative rate of decline --- which
+distinguishes actively declining samples from those stagnating at high loss,
+with no explicit noise model.
+
+\paragraph{Meta-reweighting and LoRA.}
+Ren~et~al.~\cite{ren2018learning} and Meta-Weight-Net~\cite{shu2019meta} learn
+weights via second-order gradients and a clean held-out set, at roughly
+$2\times$ compute.
+EWL uses only first-order in-run statistics.
+LoRA~\cite{hu2022lora} constrains weight updates to a rank-$r$ subspace;
+AdaLoRA~\cite{zhang2023adalora} reallocates \emph{rank} across layers using
+adapter \emph{weights}.
+EWL uses adapter \emph{gradient} norms for a complementary purpose: gating
+per-sample reweighting by current adapter activity.
